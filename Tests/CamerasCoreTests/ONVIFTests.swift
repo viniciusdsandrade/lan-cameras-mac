@@ -96,6 +96,18 @@ final class ONVIFTests: XCTestCase {
         XCTAssertTrue(corpo.contains("<tptz:PanTilt>true</tptz:PanTilt><tptz:Zoom>true</tptz:Zoom>"))
     }
 
+    func testMovendoLeOMoveStatusDaCamera() throws {
+        for (texto, esperado) in [("MOVING", true), ("IDLE", false)] {
+            let s = try ServidorHTTPFalso { _ in
+                .init(corpo: envelopeSOAP("<tptz:GetStatusResponse><tptz:PTZStatus><tt:Position><tt:PanTilt x=\"-1.0\" y=\"-1.0\"/></tt:Position>"
+                    + "<tt:MoveStatus><tt:PanTilt>\(texto)</tt:PanTilt><tt:Zoom>IDLE</tt:Zoom></tt:MoveStatus></tptz:PTZStatus></tptz:GetStatusResponse>"))
+            }
+            XCTAssertEqual(try ONVIFClient(host: "127.0.0.1", porta: s.porta).movendo(), esperado, texto)
+        }
+        let semStatus = try servidor()
+        XCTAssertThrowsError(try ONVIFClient(host: "127.0.0.1", porta: semStatus.porta).movendo())
+    }
+
     // MARK: - Posições salvas
 
     func testListaDePosicoesSalvas() throws {

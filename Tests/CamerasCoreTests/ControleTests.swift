@@ -93,6 +93,51 @@ final class ControleTests: XCTestCase {
         XCTAssertFalse(erro.contains("AbC123xY"))
     }
 
+    // MARK: - Gerente de fala
+
+    func testTocarSomEntregaOAudioComGanhoEDeixaDeFalarAoTerminar() throws {
+        let s = try servidorDeFala()
+        let g = GerenteDeFala(camera: camera(), porta: s.porta)
+        try g.tocar([UInt8](repeating: 0x55, count: 320 * 3), ganho: 1.0)
+        XCTAssertTrue(esperar(ate: 3) { self.pacotesDeFala(s).count == 3 })
+        XCTAssertTrue(esperar(ate: 3) { !g.falando }, "ao terminar a fila a sessão se encerra sozinha")
+    }
+
+    func testComecarOutraFalaCancelaAAnterior() throws {
+        let s = try servidorDeFala()
+        let g = GerenteDeFala(camera: camera(), porta: s.porta)
+        try g.tocar([UInt8](repeating: 0x55, count: 320 * 100), ganho: 1.0)           // 4 s
+        Thread.sleep(forTimeInterval: 0.2)
+        try g.tocar([UInt8](repeating: 0x66, count: 320 * 5), ganho: 1.0)             // chega antes da primeira acabar
+        XCTAssertTrue(esperar(ate: 5) { !g.falando })
+        let dados = pacotesDeFala(s).map(\.corpo)
+        XCTAssertLessThan(dados.count, 30, "a primeira fala (100 pacotes) deveria ter sido cortada: \(dados.count)")
+        XCTAssertGreaterThanOrEqual(dados.filter { $0.dropFirst(8).first == ALaw.codificar(pcm16: [0x66, 0x66]).first! || $0.count == 328 }.count, 5)
+        let logins = s.quadros.filter { $0.id == 1000 }.count
+        XCTAssertEqual(logins, 2, "uma conexão por fala")
+    }
+
+    func testFalaAoVivoEnviaOQueChegaDoMicrofoneEPara() throws {
+        let s = try servidorDeFala()
+        let g = GerenteDeFala(camera: camera(), porta: s.porta)
+        try g.iniciarAoVivo()
+        g.enviarAoVivo(pcm16: [UInt8](repeating: 0, count: 640), ganho: 1.0)          // 320 amostras = 1 pacote
+        g.enviarAoVivo(pcm16: [UInt8](repeating: 0, count: 640), ganho: 1.0)
+        XCTAssertTrue(esperar(ate: 3) { self.pacotesDeFala(s).count == 2 })
+        g.pararAoVivo()
+        XCTAssertTrue(esperar(ate: 3) { !g.falando })
+        g.enviarAoVivo(pcm16: [UInt8](repeating: 0, count: 640), ganho: 1.0)          // depois de parar, nada sai
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertEqual(self.pacotesDeFala(s).count, 2)
+    }
+
+    func testRecusaDaCameraViraErroComMotivo() throws {
+        let s = try servidorDeFala(recusar: true)
+        let g = GerenteDeFala(camera: camera(), porta: s.porta)
+        XCTAssertThrowsError(try g.tocar([0xD5], ganho: 1.0)) { XCTAssertTrue(String(describing: $0).contains("recusou"), "\($0)") }
+        XCTAssertThrowsError(try g.iniciarAoVivo())
+    }
+
     // MARK: - Movimento contínuo
 
     private func servidorOnvif() throws -> ServidorHTTPFalso {

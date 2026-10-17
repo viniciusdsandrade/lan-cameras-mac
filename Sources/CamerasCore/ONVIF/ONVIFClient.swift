@@ -147,6 +147,15 @@ public final class ONVIFClient: Sendable {
             + "<tptz:PanTilt>true</tptz:PanTilt><tptz:Zoom>true</tptz:Zoom></tptz:Stop>")
     }
 
+    /// A câmera diz que o motor de pan/tilt está andando? (`MoveStatus` do ONVIF GetStatus.)
+    public func movendo() throws -> Bool {
+        let xml = try soap("ptz", "<tptz:GetStatus><tptz:ProfileToken>\(perfil)</tptz:ProfileToken></tptz:GetStatus>")
+        guard let status = XMLMinimo.valores(xml, tag: "PanTilt").first(where: { $0 == "IDLE" || $0 == "MOVING" }) else {
+            throw ONVIFErro("a câmera não informou se está se movendo")
+        }
+        return status == "MOVING"
+    }
+
     // MARK: - Posições salvas
 
     public func presets() throws -> [PresetDaCamera] {

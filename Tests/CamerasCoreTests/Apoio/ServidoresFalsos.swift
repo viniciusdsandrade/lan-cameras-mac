@@ -154,9 +154,15 @@ final class ServidorDVRIPFalso: @unchecked Sendable {
     }
 
     private func servir() {
-        let c = accept(escuta, nil, nil)
-        guard c >= 0 else { return }
-        defer { close(c) }
+        while true {
+            let c = accept(escuta, nil, nil)
+            if c < 0 { return }
+            atender(c)
+            close(c)
+        }
+    }
+
+    private func atender(_ c: Int32) {
         while let cab = lerExato(c, 20) {
             let tam = Int(cab[16]) | Int(cab[17]) << 8 | Int(cab[18]) << 16 | Int(cab[19]) << 24
             guard let corpo = tam > 0 ? lerExato(c, tam) : [] else { return }
