@@ -41,7 +41,8 @@ echo "== 2/4 arquivos rastreados e stage"
     printf '\n'
   done
   printf '@@CTX stage\n'
-  git diff --cached -U0 --no-color -- . ":(exclude)$VARRER" 2>/dev/null | grep -E '^\+' | grep -v -E '^\+\+\+' | sed 's/^+//'
+  # grep sai com 1 quando não há nada em stage; isso não é achado (pipefail), por isso o `|| true`
+  { git diff --cached -U0 --no-color -- . ":(exclude)$VARRER" 2>/dev/null | grep -E '^\+' | grep -v -E '^\+\+\+' | sed 's/^+//'; } || true
 } | perl "$VARRER" || problemas=1
 
 echo "== 3/4 histórico de commits"
