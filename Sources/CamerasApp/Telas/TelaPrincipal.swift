@@ -1,5 +1,6 @@
 import SwiftUI
 import CamerasCore
+import CamerasSessao
 
 struct TelaPrincipal: View {
     @EnvironmentObject var modelo: ModeloDoApp

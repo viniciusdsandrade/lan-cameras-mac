@@ -1,6 +1,10 @@
 .DS_Store
 .build/
-.swiftpm/
+# do .swiftpm só vai o esquema que roda os testes no simulador de iPhone
+.swiftpm/*
+!.swiftpm/xcode/
+.swiftpm/xcode/*
+!.swiftpm/xcode/xcshareddata/
 build/
 xcuserdata/
 DerivedData/

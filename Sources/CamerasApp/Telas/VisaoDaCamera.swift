@@ -1,5 +1,6 @@
 import SwiftUI
 import CamerasCore
+import CamerasSessao
 
 struct VisaoDaCamera: View {
     @EnvironmentObject var modelo: ModeloDoApp

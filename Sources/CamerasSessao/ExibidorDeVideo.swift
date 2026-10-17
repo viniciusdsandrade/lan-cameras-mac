@@ -1,16 +1,18 @@
 import AVFoundation
 import CoreMedia
-import AppKit
+import QuartzCore
 import CamerasCore
 
 /// Reparte cada quadro decodificado entre todas as telas que o mostram (a lente móvel e a fixa
 /// usam o mesmo quadro). Guarda o último para quem chega depois.
-final class DistribuidorDeQuadros: @unchecked Sendable {
+public final class DistribuidorDeQuadros: @unchecked Sendable {
     private let trava = NSLock()
     private var ouvintes: [UUID: @Sendable (QuadroDecodificado) -> Void] = [:]
     private var ultimo: QuadroDecodificado?
 
-    func adicionar(_ ouvinte: @escaping @Sendable (QuadroDecodificado) -> Void) -> UUID {
+    public init() {}
+
+    public func adicionar(_ ouvinte: @escaping @Sendable (QuadroDecodificado) -> Void) -> UUID {
         let id = UUID()
         let atual: QuadroDecodificado? = trava.withLock {
             ouvintes[id] = ouvinte
@@ -20,11 +22,11 @@ final class DistribuidorDeQuadros: @unchecked Sendable {
         return id
     }
 
-    func remover(_ id: UUID) {
+    public func remover(_ id: UUID) {
         trava.withLock { _ = ouvintes.removeValue(forKey: id) }
     }
 
-    func distribuir(_ quadro: QuadroDecodificado) {
+    public func distribuir(_ quadro: QuadroDecodificado) {
         let todos = trava.withLock { () -> [@Sendable (QuadroDecodificado) -> Void] in
             ultimo = quadro
             return Array(ouvintes.values)
@@ -37,8 +39,8 @@ final class DistribuidorDeQuadros: @unchecked Sendable {
 /// Só o quadro mais recente importa: se a tela atrasar, os intermediários são pulados em vez de
 /// formar fila (e atraso). `exibir` pode ser chamado de qualquer thread.
 @MainActor
-final class ExibidorDeVideo {
-    let camada = AVSampleBufferDisplayLayer()
+public final class ExibidorDeVideo {
+    public let camada = AVSampleBufferDisplayLayer()
 
     /// O quadro à espera da thread principal; mexido por threads de decodificação.
     private final class Pendencia: @unchecked Sendable {
@@ -68,12 +70,12 @@ final class ExibidorDeVideo {
 
     private nonisolated let pendencia = Pendencia()
 
-    init() {
+    public init() {
         camada.videoGravity = .resize
-        camada.backgroundColor = NSColor.black.cgColor
+        camada.backgroundColor = CGColor(gray: 0, alpha: 1)
     }
 
-    nonisolated func exibir(_ quadro: QuadroDecodificado) {
+    public nonisolated func exibir(_ quadro: QuadroDecodificado) {
         guard pendencia.guardar(quadro) else { return }
         DispatchQueue.main.async { [self] in
             MainActor.assumeIsolated { descarregar() }
@@ -82,7 +84,7 @@ final class ExibidorDeVideo {
 
     private func descarregar() {
         guard let quadro = pendencia.retirar(), let amostra = Self.amostra(de: quadro.imagem) else { return }
-        if camada.status == .failed { camada.flush() }          // acontece depois de suspensão do Mac
+        if camada.status == .failed { camada.flush() }          // acontece depois de o aparelho dormir
         camada.enqueue(amostra)
     }
 
@@ -107,7 +109,7 @@ final class ExibidorDeVideo {
         return amostra
     }
 
-    func limpar() {
+    public func limpar() {
         _ = pendencia.retirar()
         camada.flushAndRemoveImage()
     }

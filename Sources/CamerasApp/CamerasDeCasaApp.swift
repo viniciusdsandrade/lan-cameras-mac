@@ -1,5 +1,6 @@
 import SwiftUI
 import CamerasCore
+import CamerasSessao
 
 @main
 struct CamerasDeCasaApp: App {

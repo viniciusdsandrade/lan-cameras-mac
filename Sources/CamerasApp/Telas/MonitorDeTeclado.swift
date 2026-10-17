@@ -1,5 +1,6 @@
 import AppKit
 import CamerasCore
+import CamerasSessao
 
 /// Setas movem a câmera enquanto estiverem apertadas (duas setas juntas dão diagonal), Espaço para,
 /// + e − dão zoom, 0 volta o zoom ao normal e M liga o som. Só vale com a tela da câmera aberta e

@@ -4,8 +4,10 @@ App nativo para macOS que mostra e controla câmeras IP XiongMai (firmware "Sofi
 as que usam os apps XMEye e iCSee) direto pela rede local, sem depender da nuvem
 do fabricante.
 
-> Em desenvolvimento. Este repositório é a versão para Mac; as versões para iOS e
-> Android virão depois, reaproveitando o mesmo núcleo de protocolos.
+> Este repositório é a versão para Mac e também o pacote que a versão para iPhone
+> usa: `CamerasCore` (protocolos, vídeo e áudio) e `CamerasSessao` (o que as telas
+> dos dois apps têm em comum) compilam para macOS 14 e iOS 17. A versão para
+> Android virá depois.
 
 ## O que faz
 
@@ -54,9 +56,16 @@ Requer macOS 14 ou superior e as Ferramentas de Linha de Comando do Xcode.
 
 ```sh
 swift build          # compila tudo
-swift test           # testes do núcleo
+swift test           # testes do núcleo e da camada de sessão
 ./scripts/build_app.sh                  # monta, assina (ad-hoc) e instala em ~/Applications
 ./scripts/build_app.sh --sem-instalar   # só monta em build/
+```
+
+Os mesmos testes rodam num simulador de iPhone (precisa do Xcode completo), pelo
+esquema `CamerasCore-iOS`, que só compila o que existe no iOS:
+
+```sh
+xcodebuild test -scheme CamerasCore-iOS -destination 'platform=iOS Simulator,name=iPhone 17'
 ```
 
 Na primeira abertura o macOS pergunta se o app pode acessar a rede local: é

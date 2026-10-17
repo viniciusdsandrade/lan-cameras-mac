@@ -1,5 +1,6 @@
 import SwiftUI
 import CamerasCore
+import CamerasSessao
 
 /// A primeira tela, enquanto não há câmeras cadastradas.
 struct TelaDeCadastro: View {

@@ -1,4 +1,5 @@
 import SwiftUI
+import CamerasSessao
 
 struct AjudaView: View {
     @Environment(\.dismiss) private var fechar

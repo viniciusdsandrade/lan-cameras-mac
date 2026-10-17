@@ -1,58 +1,15 @@
-import SwiftUI
-import AppKit
+import Foundation
+import Combine
 import CamerasCore
-
-enum Direcao: CaseIterable, Hashable {
-    case cima, baixo, esquerda, direita
-
-    /// `x > 0` vira à ESQUERDA: o firmware das câmeras tem o pan invertido.
-    var vetor: (x: Double, y: Double) {
-        switch self {
-        case .cima: return (0, 1)
-        case .baixo: return (0, -1)
-        case .esquerda: return (1, 0)
-        case .direita: return (-1, 0)
-        }
-    }
-
-    var simbolo: String {
-        switch self {
-        case .cima: return "arrow.up"
-        case .baixo: return "arrow.down"
-        case .esquerda: return "arrow.left"
-        case .direita: return "arrow.right"
-        }
-    }
-
-    var nome: String {
-        switch self {
-        case .cima: return "cima"
-        case .baixo: return "baixo"
-        case .esquerda: return "esquerda"
-        case .direita: return "direita"
-        }
-    }
-}
-
-/// Valor lido por threads de áudio e escrito pela interface.
-final class Atomico<T>: @unchecked Sendable {
-    private let trava = NSLock()
-    private var v: T
-    init(_ v: T) { self.v = v }
-    var valor: T {
-        get { trava.withLock { v } }
-        set { trava.withLock { v = newValue } }
-    }
-}
 
 /// Tudo o que se faz com uma câmera aberta na tela: vídeo, estado, movimento, posições salvas,
 /// luz, rastreio, áudio, fala e foto. Existe enquanto a tela da câmera estiver aberta; `encerrar()`
 /// solta a sessão de vídeo, o alto-falante e qualquer movimento em curso.
 @MainActor
-final class SessaoDaCamera: ObservableObject {
-    let camera: CameraConfig
-    let video: SessaoDeVideo
-    let zoom = EstadoDeZoom()
+public final class SessaoDaCamera: ObservableObject {
+    public let camera: CameraConfig
+    public let video: SessaoDeVideo
+    public let zoom = EstadoDeZoom()
     private weak var modelo: ModeloDoApp?
     private let controle: ControleDeCamera
     private let fala: GerenteDeFala
@@ -63,25 +20,27 @@ final class SessaoDaCamera: ObservableObject {
         Task { @MainActor in self?.movimentoFalhou(mensagem) }
     }
 
-    @Published private(set) var estado: EstadoDaCamera?
-    @Published private(set) var ocupadas: Set<String> = []
-    @Published private(set) var presetsDoApp: Set<String> = []
-    @Published private(set) var direcoesAtivas: Set<Direcao> = []
-    @Published private(set) var ouvindo = false
-    @Published private(set) var falandoAoVivo = false
-    @Published private(set) var nivelDoMicrofone: Float = 0
-    @Published private(set) var ultimaFoto: URL?
+    @Published public private(set) var estado: EstadoDaCamera?
+    @Published public private(set) var ocupadas: Set<String> = []
+    @Published public private(set) var presetsDoApp: Set<String> = []
+    @Published public private(set) var direcoesAtivas: Set<Direcao> = []
+    @Published public private(set) var ouvindo = false
+    @Published public private(set) var falandoAoVivo = false
+    @Published public private(set) var nivelDoMicrofone: Float = 0
+    @Published public private(set) var ultimaFoto: URL?
     /// Valores que o usuário acabou de pedir, mostrados até a câmera confirmar.
-    @Published private(set) var luzPedida: ModoDaLuz?
-    @Published private(set) var rastreioPedido: Bool?
+    @Published public private(set) var luzPedida: ModoDaLuz?
+    @Published public private(set) var rastreioPedido: Bool?
 
     private var tarefaDeEstado: Task<Void, Never>?
     private var medidor: Task<Void, Never>?
     private var ouvindoAntesDeFalar = false
+    /// O usuário quer falar (botão apertado), mesmo que a fala ainda esteja começando.
+    private var querFalar = false
     private var avisouDoRastreio = false
     private var encerrada = false
 
-    init(camera: CameraConfig, modelo: ModeloDoApp) {
+    public init(camera: CameraConfig, modelo: ModeloDoApp) {
         self.camera = camera
         self.modelo = modelo
         video = SessaoDeVideo(camera: camera, stream: modelo.qualidadeHD ? .principal : .secundario, comAudio: true)
@@ -95,18 +54,19 @@ final class SessaoDaCamera: ObservableObject {
         tarefaDeEstado = Task { [weak self] in await self?.cicloDeEstado() }
     }
 
-    static func ganho(de volume: Double) -> Double { max(0.05, min(1.0, volume / 100)) }
+    public static func ganho(de volume: Double) -> Double { max(0.05, min(1.0, volume / 100)) }
 
-    func volumeMudou(_ volume: Double) { ganho.valor = Self.ganho(de: volume) }
+    public func volumeMudou(_ volume: Double) { ganho.valor = Self.ganho(de: volume) }
 
     // MARK: - Ciclo de vida
 
-    func encerrar() {
+    public func encerrar() {
         guard !encerrada else { return }
         encerrada = true
         tarefaDeEstado?.cancel()
         medidor?.cancel()
         pararMovimento()
+        querFalar = false
         microfone?.parar()
         microfone = nil
         falandoAoVivo = false
@@ -115,6 +75,22 @@ final class SessaoDaCamera: ObservableObject {
         ouvindo = false
         video.definirOuvinteDeAudio(nil)
         video.parar()
+    }
+
+    /// Ninguém mais está segurando nada (o app perdeu o foco, chegou uma ligação): para o
+    /// movimento e a fala ao vivo, mas mantém o vídeo.
+    public func soltarControles() {
+        pararMovimento()
+        pararFalaAoVivo()
+    }
+
+    /// O sistema tomou o áudio (ligação, alarme): para de ouvir e de falar.
+    public func pararAudio() {
+        pararFalaAoVivo()
+        if ouvindo {
+            escuta.parar()
+            ouvindo = false
+        }
     }
 
     // MARK: - Estado (somente leitura)
@@ -128,7 +104,7 @@ final class SessaoDaCamera: ObservableObject {
         }
     }
 
-    func atualizarEstado() async {
+    public func atualizarEstado() async {
         let c = controle
         let novo = await Task.detached(priority: .utility) { c.lerEstado() }.value
         guard !encerrada else { return }
@@ -158,10 +134,10 @@ final class SessaoDaCamera: ObservableObject {
 
     // MARK: - Movimento
 
-    func segurar(_ d: Direcao) { atualizarDirecoes(direcoesAtivas.union([d])) }
-    func soltar(_ d: Direcao) { atualizarDirecoes(direcoesAtivas.subtracting([d])) }
+    public func segurar(_ d: Direcao) { atualizarDirecoes(direcoesAtivas.union([d])) }
+    public func soltar(_ d: Direcao) { atualizarDirecoes(direcoesAtivas.subtracting([d])) }
 
-    func atualizarDirecoes(_ novas: Set<Direcao>) {
+    public func atualizarDirecoes(_ novas: Set<Direcao>) {
         direcoesAtivas = novas
         guard !novas.isEmpty else { movimento.parar(); return }
         let v = modelo?.velocidade ?? 0.4
@@ -175,7 +151,7 @@ final class SessaoDaCamera: ObservableObject {
         movimento.iniciar(x: x, y: y)
     }
 
-    func pararMovimento() {
+    public func pararMovimento() {
         direcoesAtivas = []
         movimento.parar()
     }
@@ -187,38 +163,38 @@ final class SessaoDaCamera: ObservableObject {
 
     // MARK: - Posições salvas
 
-    func irPara(_ p: PresetDaCamera) {
+    public func irPara(_ p: PresetDaCamera) {
         let c = controle
         agir("preset-\(p.token)", sucesso: "Indo para \(p.nome)") { try c.irParaPreset(p.token) }
     }
 
-    func salvarPosicao(nome: String) {
+    public func salvarPosicao(nome: String) {
         let c = controle
         agir("salvar-preset", sucesso: "Posição salva") { _ = try c.salvarPreset(nome: nome) }
     }
 
-    func apagar(_ p: PresetDaCamera) {
+    public func apagar(_ p: PresetDaCamera) {
         let c = controle
         agir("apagar-\(p.token)", sucesso: "Posição apagada") { try c.apagarPreset(p.token) }
     }
 
     // MARK: - Luz e rastreio
 
-    func definirLuz(_ modo: ModoDaLuz) {
+    public func definirLuz(_ modo: ModoDaLuz) {
         guard modo != (luzPedida ?? estado?.luz) else { return }
         luzPedida = modo
         let c = controle
         agir("luz", sucesso: "Luz: \(Self.nome(da: modo))") { try c.definirLuz(modo) }
     }
 
-    func definirRastreio(_ ligado: Bool) {
+    public func definirRastreio(_ ligado: Bool) {
         guard ligado != (rastreioPedido ?? estado?.rastreioLigado) else { return }
         rastreioPedido = ligado
         let c = controle
         agir("rastreio", sucesso: ligado ? "Rastreio ligado" : "Rastreio desligado") { try c.definirRastreio(ligado) }
     }
 
-    static func nome(da modo: ModoDaLuz) -> String {
+    public static func nome(da modo: ModoDaLuz) -> String {
         switch modo {
         case .automatico: return "automática"
         case .ligada: return "ligada"
@@ -228,7 +204,7 @@ final class SessaoDaCamera: ObservableObject {
 
     // MARK: - Áudio
 
-    func alternarOuvir() {
+    public func alternarOuvir() {
         if ouvindo {
             escuta.parar()
             ouvindo = false
@@ -242,12 +218,12 @@ final class SessaoDaCamera: ObservableObject {
         }
     }
 
-    func tocar(_ som: Som) {
+    public func tocar(_ som: Som) {
         let g = fala, ganho = self.ganho
         agir("som", sucesso: "\(som.rotulo) tocando em \(camera.nome)") { try g.tocar(som.alaw, ganho: ganho.valor) }
     }
 
-    func falarTexto(_ texto: String) {
+    public func falarTexto(_ texto: String) {
         guard !texto.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let g = fala, ganho = self.ganho
         agir("texto", sucesso: "Falando em \(camera.nome)") {
@@ -256,25 +232,35 @@ final class SessaoDaCamera: ObservableObject {
         }
     }
 
-    func pararSom() {
+    public func pararSom() {
         fala.parar()
         modelo?.avisar("Som parado")
     }
 
-    /// Liga ou desliga a fala ao vivo (microfone do Mac para o alto-falante da câmera).
-    func alternarFalaAoVivo() {
-        if falandoAoVivo { pararFalaAoVivo(); return }
+    /// Liga ou desliga a fala ao vivo (microfone do aparelho para o alto-falante da câmera).
+    public func alternarFalaAoVivo() {
+        if falandoAoVivo || querFalar { pararFalaAoVivo() } else { iniciarFalaAoVivo() }
+    }
+
+    /// Começa a fala ao vivo. Pode ser chamada ao apertar um botão de "segurar para falar":
+    /// se o botão for solto antes de a câmera aceitar, a fala é desfeita assim que começa.
+    public func iniciarFalaAoVivo() {
+        guard !querFalar, !falandoAoVivo, !encerrada else { return }
+        querFalar = true
         guard !ocupadas.contains("fala-ao-vivo") else { return }
         ocupadas.insert("fala-ao-vivo")
         Task {
             defer { ocupadas.remove("fala-ao-vivo") }
             guard await Microfone.permitido() else {
+                querFalar = false
                 modelo?.avisar(Microfone.Falha.semPermissao.description, .erro)
                 return
             }
+            guard querFalar, !encerrada else { return }               // soltou antes de começar
             let g = fala, ganho = self.ganho
             do {
                 try await Task.detached(priority: .userInitiated) { try g.iniciarAoVivo() }.value
+                guard querFalar, !encerrada else { fala.pararAoVivo(); return }
                 let mic = Microfone { bytes in g.enviarAoVivo(pcm16: bytes, ganho: ganho.valor) }
                 try mic.iniciar()
                 microfone = mic
@@ -284,13 +270,15 @@ final class SessaoDaCamera: ObservableObject {
                 falandoAoVivo = true
                 iniciarMedidor()
             } catch {
+                querFalar = false
                 fala.pararAoVivo()
                 modelo?.avisar(Redact.texto(String(describing: error)), .erro)
             }
         }
     }
 
-    func pararFalaAoVivo() {
+    public func pararFalaAoVivo() {
+        querFalar = false
         guard falandoAoVivo else { return }
         microfone?.parar()
         microfone = nil
@@ -315,7 +303,7 @@ final class SessaoDaCamera: ObservableObject {
 
     // MARK: - Foto
 
-    func tirarFoto() {
+    public func tirarFoto() {
         guard let quadro = video.ultimoQuadro else {
             modelo?.avisar("Ainda não chegou imagem desta câmera.", .erro)
             return
@@ -323,22 +311,17 @@ final class SessaoDaCamera: ObservableObject {
         let lente: Lente? = camera.duasLentes ? .movel : nil
         let nome = camera.nome
         Task {
-            let url = await Task.detached(priority: .userInitiated) { () -> URL? in
-                guard let dados = quadro.jpeg(lente: lente) else { return nil }
-                let pasta = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Pictures/Câmeras de Casa", isDirectory: true)
-                try? FileManager.default.createDirectory(at: pasta, withIntermediateDirectories: true)
-                let formato = DateFormatter()
-                formato.locale = Locale(identifier: "en_US_POSIX")
-                formato.dateFormat = "yyyyMMdd-HHmmss"
-                let seguro = nome.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
-                let destino = pasta.appendingPathComponent("\(seguro)-\(formato.string(from: Date())).jpg")
-                return (try? dados.write(to: destino)) != nil ? destino : nil
-            }.value
-            if let url {
-                ultimaFoto = url
-                modelo?.avisar("Foto salva em Imagens > Câmeras de Casa", .ok, arquivo: url)
-            } else {
-                modelo?.avisar("Não consegui salvar a foto.", .erro)
+            let dados = await Task.detached(priority: .userInitiated) { quadro.jpeg(lente: lente) }.value
+            guard let dados else {
+                modelo?.avisar("Não consegui gerar a foto.", .erro)
+                return
+            }
+            do {
+                let guardada = try await Plataforma.guardarFoto(dados, nomeDaCamera: nome)
+                ultimaFoto = guardada.arquivo
+                modelo?.avisar("Foto salva em \(guardada.onde)", .ok, arquivo: guardada.arquivo)
+            } catch {
+                modelo?.avisar("Não consegui salvar a foto: \(Redact.texto(String(describing: error)))", .erro)
             }
         }
     }

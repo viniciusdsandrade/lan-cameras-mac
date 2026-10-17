@@ -1,5 +1,6 @@
 import SwiftUI
 import CamerasCore
+import CamerasSessao
 
 extension FluxoDeVideo.Estado {
     var cor: Color {

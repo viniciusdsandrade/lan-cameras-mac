@@ -1,38 +1,7 @@
 import SwiftUI
 import AppKit
 import CamerasCore
-
-/// Qual parte do quadro a tela mostra. As câmeras de duas lentes mandam as duas vistas
-/// empilhadas: a móvel (a única que gira) embaixo, a fixa em cima.
-enum LenteExibida {
-    case movel
-    case fixa
-    case inteira
-}
-
-/// Zoom digital (as câmeras não têm zoom óptico) e deslocamento, compartilhados entre a tela
-/// da lente e os controles ao lado.
-@MainActor
-final class EstadoDeZoom: ObservableObject {
-    static let minimo = 1.0
-    static let maximo = 5.0
-
-    @Published var zoom = 1.0
-    /// Deslocamento em pontos, a partir do centro; só vale com zoom acima de 1.
-    @Published var x = 0.0
-    @Published var y = 0.0
-
-    func definir(_ novo: Double) {
-        zoom = min(Self.maximo, max(Self.minimo, novo))
-        if zoom <= Self.minimo { x = 0; y = 0 }
-    }
-
-    func reiniciar() {
-        zoom = Self.minimo
-        x = 0
-        y = 0
-    }
-}
+import CamerasSessao
 
 struct VistaDaLente: NSViewRepresentable {
     let distribuidor: DistribuidorDeQuadros
@@ -118,12 +87,12 @@ final class LenteNSView: NSView {
     func aplicarZoom() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        let z = zoomHabilitado ? zoom.zoom : 1
-        let limiteX = (z - 1) * bounds.width / 2
-        let limiteY = (z - 1) * bounds.height / 2
-        let x = max(-limiteX, min(limiteX, zoom.x))
-        let y = max(-limiteY, min(limiteY, zoom.y))
-        camadaDeZoom.setAffineTransform(CGAffineTransform(translationX: x, y: y).scaledBy(x: z, y: z))
+        if zoomHabilitado {
+            let (x, y) = zoom.deslocamentoLimitado(largura: bounds.width, altura: bounds.height)
+            camadaDeZoom.setAffineTransform(CGAffineTransform(translationX: x, y: y).scaledBy(x: zoom.zoom, y: zoom.zoom))
+        } else {
+            camadaDeZoom.setAffineTransform(.identity)
+        }
         CATransaction.commit()
     }
 
@@ -133,13 +102,7 @@ final class LenteNSView: NSView {
     @MainActor
     private func ampliar(por fator: Double, em ponto: CGPoint) {
         guard zoomHabilitado else { return }
-        let antes = zoom.zoom
-        zoom.definir(antes * fator)
-        let razao = zoom.zoom / antes
-        let px = ponto.x - bounds.midX, py = ponto.y - bounds.midY
-        zoom.x = px - (px - zoom.x) * razao
-        zoom.y = py - (py - zoom.y) * razao
-        if zoom.zoom <= EstadoDeZoom.minimo { zoom.x = 0; zoom.y = 0 }
+        zoom.ampliar(por: fator, emX: ponto.x - bounds.midX, y: ponto.y - bounds.midY)
         aplicarZoom()
     }
 

@@ -1,5 +1,6 @@
 import SwiftUI
 import CamerasCore
+import CamerasSessao
 
 /// Os controles de uma câmera: movimento e zoom, posições salvas, luz e rastreio, imagem e som.
 struct PainelDeControles: View {
