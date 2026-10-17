@@ -16,6 +16,26 @@ do fabricante.
 - Ouvir a câmera, falar por ela ao vivo, tocar sons prontos e texto falado.
 - Foto da lente atual.
 
+## Usar
+
+| tecla | ação |
+| --- | --- |
+| ⌘0 | visão geral |
+| ⌘1 a ⌘9 | abre uma câmera |
+| setas | movem a câmera enquanto estiverem apertadas (duas juntas fazem diagonal) |
+| espaço | para o movimento |
+| ⇧⌘. | para o movimento de todas as câmeras |
+| + e − | zoom digital; 0 volta ao normal |
+| M | liga e desliga o som da câmera |
+| ⇧⌘P | foto da lente atual |
+
+Na imagem, rolar ou pinçar no trackpad aproxima no ponto do cursor, arrastar move a
+imagem aproximada e o duplo clique volta ao normal.
+
+O app só fica conectado às câmeras enquanto alguém pode ver o vídeo: ao minimizar a
+janela, ocultar o app ou quando o Mac dorme, ele solta as conexões (as câmeras
+aguentam poucas ao mesmo tempo) e as reabre ao voltar.
+
 ## Como funciona
 
 Fala direto com cada câmera, sem servidor intermediário e sem abrir nenhuma porta
@@ -41,6 +61,23 @@ swift test           # testes do núcleo
 
 Na primeira abertura o macOS pergunta se o app pode acessar a rede local: é
 necessário permitir.
+
+O ícone é desenhado por código, sem imagens de partida. Para gerá-lo de novo depois
+de mudar o desenho:
+
+```sh
+swift scripts/make_icon.swift           # grava Resources/AppIcon.icns
+```
+
+Para acompanhar o que o app faz com as câmeras (conexões, pausas ao minimizar), sem
+credenciais no texto:
+
+```sh
+CAMERAS_DEPURAR=1 "$HOME/Applications/Câmeras de Casa.app/Contents/MacOS/CamerasDeCasa"
+```
+
+`camspike` é uma ferramenta de linha de comando que usa o mesmo núcleo para testar
+cada parte direto nas câmeras (`swift run camspike` mostra os comandos).
 
 ## Privacidade
 
