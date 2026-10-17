@@ -98,3 +98,7 @@ imagens de nenhuma instalação. Para conferir antes de publicar qualquer mudan�
 ```sh
 ./scripts/verificar-privacidade.sh
 ```
+
+## Licença
+
+MIT: código aberto, use, modifique e distribua à vontade. Veja [LICENSE](LICENSE).
