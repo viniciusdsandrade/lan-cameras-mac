@@ -9,6 +9,7 @@ import CamerasCore
 //   camspike estado [--camera NOME]
 //   camspike video --camera NOME [--stream principal|secundario] [--frames N] [--segundos S] [--saida PREFIXO]
 //   camspike ptz-medir --camera NOME [--direcao esquerda|direita|cima|baixo] [--velocidade V] [--ms N]
+//   camspike audio --camera NOME [--segundos N]
 //   camspike mover --camera NOME --direcao D [--velocidade V] [--ms N]
 //   camspike posicao listar|salvar|ir|apagar --camera NOME [--nome N] [--token T]
 //   camspike luz --camera NOME --modo automatico|ligada|desligada
@@ -28,6 +29,7 @@ case "estado": comandoEstado(opcoes)
 case "video": comandoVideo(opcoes)
 case "ptz-medir": comandoPtzMedir(opcoes)
 case "mover": comandoMover(opcoes)
+case "audio": comandoAudio(opcoes)
 case "posicao": comandoPosicao(Array(argumentos.dropFirst()))
 case "luz": comandoLuz(opcoes)
 case "rastreio": comandoRastreio(opcoes)

@@ -9,8 +9,13 @@ func uso() -> Never {
       camspike descobrir [--salvar] [--segundos N]
       camspike adicionar --ip ENDERECO [--salvar]
       camspike estado [--camera NOME]
-      camspike ptz-medir --camera NOME [--direcao esquerda|direita|cima|baixo] [--velocidade V] [--ms N] [--sem-parar]
       camspike video --camera NOME [--stream principal|secundario] [--frames N] [--segundos S] [--saida PREFIXO]
+      camspike ptz-medir --camera NOME [--direcao esquerda|direita|cima|baixo] [--velocidade V] [--ms N] [--sem-parar]
+      camspike audio --camera NOME [--segundos N]
+      camspike mover --camera NOME --direcao D [--velocidade V] [--ms N]
+      camspike posicao listar|salvar|ir|apagar --camera NOME [--nome N] [--token T]
+      camspike luz --camera NOME --modo automatico|ligada|desligada
+      camspike rastreio --camera NOME --ligado sim|nao
 
     """, stderr)
     exit(2)
@@ -415,4 +420,49 @@ final class SondaDeMovimento: @unchecked Sendable {
 
     func parar() { trava.withLock { rodando = false } }
     var copia: [(t: TimeInterval, movendo: Bool)] { trava.withLock { _leituras } }
+}
+
+// MARK: - audio: a câmera entrega som? (só escuta; não toca nada)
+
+final class ColetorDeAudio: @unchecked Sendable {
+    private let trava = NSLock()
+    private(set) var pacotes = 0
+    private(set) var amostras = 0
+    private var soma = 0.0
+    private(set) var pico = 0
+    private var tipos: Set<UInt8> = []
+
+    func registrar(_ p: RTPPacket) {
+        let pcm = ALaw.decodificar(p.carga)
+        trava.withLock {
+            pacotes += 1
+            tipos.insert(p.tipoDeCarga)
+            for v in pcm { amostras += 1; soma += Double(v) * Double(v); pico = max(pico, abs(Int(v))) }
+        }
+    }
+
+    var resumo: (pacotes: Int, amostras: Int, rms: Double, pico: Int, tipos: [UInt8]) {
+        trava.withLock { (pacotes, amostras, amostras > 0 ? (soma / Double(amostras)).squareRoot() : 0, pico, tipos.sorted()) }
+    }
+}
+
+func comandoAudio(_ opcoes: Opcoes) {
+    let camera = cameraEscolhida(opcoes)
+    let segundos = opcoes.decimal("--segundos", padrao: 5)
+    let coletor = ColetorDeAudio()
+    let fluxo = FluxoDeVideo(url: camera.urlDeVideo(.secundario), incluirAudio: true)
+    fluxo.aoReceberAudio = { coletor.registrar($0) }
+    fluxo.iniciar()
+    defer { fluxo.parar() }
+    let inicio = Date()
+    while fluxo.quadrosRecebidos < 1, Date().timeIntervalSince(inicio) < 15 { Thread.sleep(forTimeInterval: 0.05) }
+    let t0 = Date()
+    let antes = coletor.resumo.pacotes
+    Thread.sleep(forTimeInterval: segundos)
+    let r = coletor.resumo
+    let decorrido = Date().timeIntervalSince(t0)
+    let porSegundo = Double(r.pacotes - antes) / decorrido
+    print(String(format: "pacotes de áudio: %.1f por segundo (esperado ~25 = 40 ms cada), tipo de carga %@", porSegundo, r.tipos.map(String.init).joined(separator: ",")))
+    print(String(format: "nível do som ambiente: RMS %.0f, pico %d (de 32768)", r.rms, r.pico))
+    print(r.pacotes - antes > 10 && abs(porSegundo - 25) < 6 && r.tipos == [8] ? "RESULTADO: OK (áudio PCMA chegando em tempo real)" : "RESULTADO: FALHOU")
 }
