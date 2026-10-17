@@ -227,6 +227,7 @@ public final class ModeloDoApp: ObservableObject {
     // MARK: - Avisos
 
     public func avisar(_ texto: String, _ tipo: Aviso.Tipo = .info, arquivo: URL? = nil) {
+        Depuracao.registrar("aviso (\(tipo)): \(texto)")
         let novo = Aviso(texto: texto, tipo: tipo, arquivo: arquivo)
         aviso = novo
         Task {
