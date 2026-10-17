@@ -1,0 +1,24 @@
+.DS_Store
+.build/
+.swiftpm/
+build/
+xcuserdata/
+DerivedData/
+*.app/
+
+# Defesa em profundidade: dados da instalação (credenciais, IPs, imagens das
+# câmeras) nunca entram no repositório. O app guarda tudo isso fora desta pasta.
+*.env
+creds*
+cameras.json
+*.jpg
+*.jpeg
+*.heic
+*.h264
+*.h265
+*.hevc
+*.sdp
+*.pcap
+*.mp4
+*.mov
+*.log
