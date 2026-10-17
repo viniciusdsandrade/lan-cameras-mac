@@ -175,7 +175,11 @@ public final class DecodificadorDeVideo: @unchecked Sendable {
     }
 
     private func criarSessao(_ descricao: CMVideoFormatDescription) -> VTDecompressionSession? {
+        #if os(macOS)
         let especificacao: [CFString: Any] = [kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: true]
+        #else
+        let especificacao: [CFString: Any] = [:]          // no iOS a chave não existe: o hardware já é o padrão
+        #endif
         let atributos: [CFString: Any] = [
             kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
             kCVPixelBufferMetalCompatibilityKey: true,

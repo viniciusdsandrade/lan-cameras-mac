@@ -208,10 +208,12 @@ public final class SessaoDaCamera: ObservableObject {
         if ouvindo {
             escuta.parar()
             ouvindo = false
+            Depuracao.registrar("\(camera.nome): ouvir desligado")
         } else {
             do {
                 try escuta.iniciar()
                 ouvindo = true
+                Depuracao.registrar("\(camera.nome): ouvir ligado")
             } catch {
                 modelo?.avisar("Não consegui ligar o som: \(error.localizedDescription)", .erro)
             }
@@ -220,6 +222,7 @@ public final class SessaoDaCamera: ObservableObject {
 
     public func tocar(_ som: Som) {
         let g = fala, ganho = self.ganho
+        Depuracao.registrar("\(camera.nome): tocar \(som.rotulo) com volume \(Int(ganho.valor * 100))%")
         agir("som", sucesso: "\(som.rotulo) tocando em \(camera.nome)") { try g.tocar(som.alaw, ganho: ganho.valor) }
     }
 
@@ -268,6 +271,7 @@ public final class SessaoDaCamera: ObservableObject {
                 ouvindoAntesDeFalar = ouvindo
                 if ouvindo { escuta.parar(); ouvindo = false }
                 falandoAoVivo = true
+                Depuracao.registrar("\(camera.nome): fala ao vivo começou\(ouvindoAntesDeFalar ? " (ouvir silenciado)" : "")")
                 iniciarMedidor()
             } catch {
                 querFalar = false
@@ -284,6 +288,7 @@ public final class SessaoDaCamera: ObservableObject {
         microfone = nil
         fala.pararAoVivo()
         falandoAoVivo = false
+        Depuracao.registrar("\(camera.nome): fala ao vivo terminou")
         medidor?.cancel()
         nivelDoMicrofone = 0
         if ouvindoAntesDeFalar, !encerrada { alternarOuvir() }

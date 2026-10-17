@@ -1,12 +1,19 @@
 import Foundation
+import os
 import CamerasCore
 
 /// Registro para depurar o ciclo de vida: só escreve com CAMERAS_DEPURAR=1 e nunca leva credenciais.
+/// Vai para a saída de erro (o terminal, no Mac; o `devicectl --console`, no iPhone) e para o log
+/// do sistema (o `log stream` alcança o app no simulador).
 public enum Depuracao {
     public static let ligada = ProcessInfo.processInfo.environment["CAMERAS_DEPURAR"] == "1"
+    private static let log = Logger(subsystem: "com.lancameras", category: "cameras")
+
     public static func registrar(_ texto: @autoclosure () -> String) {
         guard ligada else { return }
-        FileHandle.standardError.write(Data("[cameras] \(Redact.texto(texto()))\n".utf8))
+        let t = Redact.texto(texto())
+        FileHandle.standardError.write(Data("[cameras] \(t)\n".utf8))
+        log.log("\(t, privacy: .public)")
     }
 }
 
