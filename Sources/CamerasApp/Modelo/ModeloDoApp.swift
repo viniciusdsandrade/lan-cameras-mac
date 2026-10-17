@@ -2,6 +2,15 @@ import SwiftUI
 import AppKit
 import CamerasCore
 
+/// Registro para depurar o ciclo de vida: só escreve com CAMERAS_DEPURAR=1 e nunca leva credenciais.
+enum Depuracao {
+    static let ligada = ProcessInfo.processInfo.environment["CAMERAS_DEPURAR"] == "1"
+    static func registrar(_ texto: @autoclosure () -> String) {
+        guard ligada else { return }
+        FileHandle.standardError.write(Data("[cameras] \(Redact.texto(texto()))\n".utf8))
+    }
+}
+
 struct Aviso: Identifiable, Equatable {
     enum Tipo { case info, ok, erro }
     let id = UUID()
@@ -97,6 +106,7 @@ final class ModeloDoApp: ObservableObject {
     /// Libera todas as sessões (janela escondida, Mac dormindo) sem perder a seleção.
     func pausar() {
         guard !pausado else { return }
+        Depuracao.registrar("pausar: soltando as sessões")
         pausado = true
         for s in sessoesGerais.values { s.parar() }
         sessoesGerais = [:]
@@ -106,6 +116,7 @@ final class ModeloDoApp: ObservableObject {
 
     func retomar() {
         guard pausado else { return }
+        Depuracao.registrar("retomar: reabrindo as sessões")
         pausado = false
         ajustarSessoes()
     }
@@ -203,9 +214,22 @@ final class ModeloDoApp: ObservableObject {
         quando(ws, NSWorkspace.didWakeNotification) { m, _ in m.retomarDepois(segundos: 3) }       // dá tempo ao Wi-Fi de voltar
         quando(ws, NSWorkspace.screensDidWakeNotification) { m, _ in m.retomarDepois(segundos: 1) }
         quando(nc, NSApplication.willTerminateNotification) { m, _ in m.sessaoDaCamera?.encerrar() }
+        quando(nc, NSWindow.didMiniaturizeNotification) { m, _ in
+            Depuracao.registrar("janela minimizada")
+            m.pausarDepois(segundos: 1)
+        }
+        quando(nc, NSWindow.didDeminiaturizeNotification) { m, _ in
+            Depuracao.registrar("janela restaurada")
+            m.retomarDepois(segundos: 0)
+        }
+        quando(nc, NSApplication.didHideNotification) { m, _ in m.pausarDepois(segundos: 1) }
+        quando(nc, NSApplication.didUnhideNotification) { m, _ in m.retomarDepois(segundos: 0) }
         quando(nc, NSWindow.didChangeOcclusionStateNotification) { m, n in
-            guard let w = n.object as? NSWindow, w.canBecomeMain else { return }
-            if w.occlusionState.contains(.visible) { m.retomarDepois(segundos: 0) } else { m.pausarDepois(segundos: 3) }
+            guard let w = n.object as? NSWindow else { return }
+            let visivel = w.occlusionState.contains(.visible)
+            Depuracao.registrar("oclusão: \(visivel ? "visível" : "escondida") (podeSerPrincipal=\(w.canBecomeMain), minimizada=\(w.isMiniaturized))")
+            guard w.canBecomeMain else { return }
+            if visivel { m.retomarDepois(segundos: 0) } else { m.pausarDepois(segundos: 3) }
         }
     }
 

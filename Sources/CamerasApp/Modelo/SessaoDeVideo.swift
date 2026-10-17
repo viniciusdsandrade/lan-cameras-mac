@@ -17,7 +17,9 @@ final class SessaoDeVideo: ObservableObject {
         fluxo = FluxoDeVideo(url: camera.urlDeVideo(stream), incluirAudio: comAudio)
         let distribuidor = self.distribuidor
         fluxo.aoReceberQuadro = { distribuidor.distribuir($0) }
+        let rotulo = "\(camera.nome) (\(stream))"
         fluxo.aoMudarEstado = { [weak self] novo in
+            Depuracao.registrar("\(rotulo): \(novo)")
             Task { @MainActor in self?.estado = novo }
         }
     }
