@@ -119,7 +119,7 @@ final class ServidorHTTPFalso: @unchecked Sendable {
 
 /// Servidor DVRIP em 127.0.0.1 (uma conexão): responde o JSON de cada pedido e guarda tudo.
 final class ServidorDVRIPFalso: @unchecked Sendable {
-    struct Quadro { let id: Int; let sessao: UInt32; let corpo: [UInt8] }
+    struct Quadro { let id: Int; let sessao: UInt32; let corpo: [UInt8]; let instante: TimeInterval }
 
     let porta: UInt16
     private let escuta: Int32
@@ -162,7 +162,7 @@ final class ServidorDVRIPFalso: @unchecked Sendable {
             guard let corpo = tam > 0 ? lerExato(c, tam) : [] else { return }
             let id = Int(cab[14]) | Int(cab[15]) << 8
             let sessao = UInt32(cab[4]) | UInt32(cab[5]) << 8 | UInt32(cab[6]) << 16 | UInt32(cab[7]) << 24
-            trava.withLock { _quadros.append(Quadro(id: id, sessao: sessao, corpo: corpo)) }
+            trava.withLock { _quadros.append(Quadro(id: id, sessao: sessao, corpo: corpo, instante: ProcessInfo.processInfo.systemUptime)) }
             var texto = corpo
             while let u = texto.last, u == 0 || u == 0x0A { texto.removeLast() }
             guard let json = (try? JSONSerialization.jsonObject(with: Data(texto))) as? [String: Any],
