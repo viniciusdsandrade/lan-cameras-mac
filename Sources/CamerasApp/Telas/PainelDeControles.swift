@@ -26,7 +26,7 @@ struct PainelDeControles: View {
             som
         }
         .alert("Salvar a posição atual", isPresented: $salvandoPosicao) {
-            TextField("Nome (ex.: Portão fechado)", text: $nomeDaPosicao)
+            TextField("Nome (ex.: Vista da rua)", text: $nomeDaPosicao)
             Button("Salvar") { sessao.salvarPosicao(nome: nomeDaPosicao) }
             Button("Cancelar", role: .cancel) {}
         } message: {
