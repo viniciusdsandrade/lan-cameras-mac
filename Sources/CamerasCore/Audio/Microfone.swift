@@ -1,7 +1,7 @@
 import Foundation
 import AVFoundation
 
-/// Capta o microfone do Mac e entrega PCM de 16 bits, 8 kHz, mono (little-endian), o que o
+/// Capta o microfone do aparelho e entrega PCM de 16 bits, 8 kHz, mono (little-endian), o que o
 /// alto-falante da câmera espera depois de virar A-law.
 public final class Microfone: @unchecked Sendable {
     public enum Falha: Error, CustomStringConvertible {
@@ -11,8 +11,13 @@ public final class Microfone: @unchecked Sendable {
 
         public var description: String {
             switch self {
+            #if os(iOS)
+            case .semPermissao: return "o iOS não liberou o microfone: permita em Ajustes > Privacidade e Segurança > Microfone"
+            case .semEntrada: return "nenhum microfone disponível agora"
+            #else
             case .semPermissao: return "o macOS não liberou o microfone: permita em Ajustes do Sistema > Privacidade e Segurança > Microfone"
             case .semEntrada: return "este Mac não tem microfone disponível"
+            #endif
             case .formatoNaoSuportado: return "formato de áudio do microfone não suportado"
             }
         }
@@ -45,6 +50,12 @@ public final class Microfone: @unchecked Sendable {
         trava.lock()
         defer { trava.unlock() }
         guard !ativo else { return }
+        #if os(iOS)
+        // antes de olhar o formato da entrada: sem a sessão ligada, o iOS diz 0 Hz
+        try SessaoDeAudio.pedir()
+        var pronto = false
+        defer { if !pronto { SessaoDeAudio.soltar() } }
+        #endif
         let entrada = motor.inputNode
         let origem = entrada.outputFormat(forBus: 0)
         guard origem.sampleRate > 0, origem.channelCount > 0 else { throw Falha.semEntrada }
@@ -73,8 +84,16 @@ public final class Microfone: @unchecked Sendable {
             entrega(bytes)
         }
         motor.prepare()
-        try motor.start()
+        do {
+            try motor.start()
+        } catch {
+            entrada.removeTap(onBus: 0)
+            throw error
+        }
         ativo = true
+        #if os(iOS)
+        pronto = true
+        #endif
     }
 
     public func parar() {
@@ -85,6 +104,9 @@ public final class Microfone: @unchecked Sendable {
         motor.inputNode.removeTap(onBus: 0)
         motor.stop()
         _nivel = 0
+        #if os(iOS)
+        SessaoDeAudio.soltar()
+        #endif
     }
 
     private func medir(_ buffer: AVAudioPCMBuffer) {

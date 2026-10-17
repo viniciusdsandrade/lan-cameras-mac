@@ -1,7 +1,7 @@
 import Foundation
 import AVFoundation
 
-/// Toca no Mac o áudio que a câmera manda (RTP, G.711 A-law, 8 kHz).
+/// Toca no aparelho o áudio que a câmera manda (RTP, G.711 A-law, 8 kHz).
 public final class Escuta: @unchecked Sendable {
     private static let pacotesAntesDeTocar = 3          // ~120 ms de folga contra a variação da rede
 
@@ -30,7 +30,12 @@ public final class Escuta: @unchecked Sendable {
         trava.lock()
         defer { trava.unlock() }
         guard !ativo else { return }
+        #if os(iOS)
+        try SessaoDeAudio.pedir()
+        do { try motor.start() } catch { SessaoDeAudio.soltar(); throw error }
+        #else
         try motor.start()
+        #endif
         ativo = true
         agendados = 0
         // se o dispositivo de saída mudar (fones, AirPlay…), o motor para: religa
@@ -65,5 +70,8 @@ public final class Escuta: @unchecked Sendable {
         if let o = observador { NotificationCenter.default.removeObserver(o); observador = nil }
         jogador.stop()
         motor.stop()
+        #if os(iOS)
+        SessaoDeAudio.soltar()
+        #endif
     }
 }

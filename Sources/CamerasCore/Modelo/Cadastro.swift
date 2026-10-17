@@ -20,13 +20,37 @@ public enum Cadastro {
 
     /// Procura câmeras por WS-Discovery e identifica cada uma.
     public static func procurar(duracao: TimeInterval = 4) throws -> Resultado {
-        let achados = try DescobertaWS.descobrir(duracao: duracao)
+        identificarTodos(try DescobertaWS.descobrir(duracao: duracao).map(\.host))
+    }
+
+    /// Procura câmeras batendo na porta do ONVIF de cada endereço do Wi-Fi (sem multicast).
+    public static func procurarPorVarredura(porta: UInt16 = 8899) throws -> Resultado {
+        let redes = VarreduraDeRede.redesLocais()
+        guard !redes.isEmpty else { throw VarreduraDeRede.Falha.semRedeLocal }
+        var hosts: [String] = []
+        for rede in redes { hosts += VarreduraDeRede.enderecos(de: rede).filter { !hosts.contains($0) } }
+        let r = VarreduraDeRede.testar(hosts, porta: porta)
+        if VarreduraDeRede.pareceSemPermissao(r) { throw VarreduraDeRede.Falha.semPermissao }
+        return identificarTodos(r.abertos, porta: porta)
+    }
+
+    /// O jeito de procurar de cada aparelho: no Mac, WS-Discovery e, se nada responder, a varredura;
+    /// no iOS, só a varredura (o multicast exige uma autorização da Apple).
+    public static func procurarNaRede(duracao: TimeInterval = 4) throws -> Resultado {
+        #if os(macOS)
+        if let r = try? procurar(duracao: duracao), !r.cameras.isEmpty { return r }
+        #endif
+        return try procurarPorVarredura()
+    }
+
+    /// Identifica cada endereço; os que não responderem como câmera vão para `falhas`.
+    static func identificarTodos(_ hosts: [String], porta: UInt16 = 8899) -> Resultado {
         var r = Resultado()
-        for (i, a) in achados.enumerated() {
+        for h in hosts {
             do {
-                r.cameras.append(try identificar(host: a.host, nome: "Câmera \(i + 1)"))
+                r.cameras.append(try identificar(host: h, porta: porta, nome: "Câmera \(r.cameras.count + 1)"))
             } catch {
-                r.falhas.append("\(a.host): \(error)")
+                r.falhas.append("\(h): \(error)")
             }
         }
         return r

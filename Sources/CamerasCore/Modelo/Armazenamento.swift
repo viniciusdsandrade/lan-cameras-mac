@@ -4,14 +4,20 @@ import Foundation
 ///
 /// Tudo fica em `~/Library/Application Support/Câmeras de Casa/`, pasta 0700 e
 /// arquivos 0600, longe de qualquer repositório e fora do Keychain: com assinatura
-/// ad-hoc o macOS pede autorização de novo a cada build do app.
+/// ad-hoc o macOS pede autorização de novo a cada build do app. No iOS, a mesma pasta
+/// dentro do sandbox do app, fora do backup do iCloud (o hash nunca sai do aparelho).
 public final class ArmazenamentoDeCameras: @unchecked Sendable {
     public static var pastaPadrao: URL {
         if let p = ProcessInfo.processInfo.environment["CAMERAS_PASTA"], !p.isEmpty {
             return URL(fileURLWithPath: p, isDirectory: true)
         }
-        return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Câmeras de Casa", isDirectory: true)
+        #if os(macOS)
+        let base = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
+        #else
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        #endif
+        return base.appendingPathComponent("Câmeras de Casa", isDirectory: true)
     }
 
     private let pasta: URL
@@ -107,6 +113,12 @@ public final class ArmazenamentoDeCameras: @unchecked Sendable {
         try fm.createDirectory(at: pasta, withIntermediateDirectories: true,
                                attributes: [.posixPermissions: 0o700])
         try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: pasta.path)
+        #if os(iOS)
+        var foraDoBackup = URLResourceValues()
+        foraDoBackup.isExcludedFromBackup = true
+        var p = pasta
+        try p.setResourceValues(foraDoBackup)
+        #endif
         let codificador = JSONEncoder()
         codificador.outputFormatting = [.prettyPrinted, .sortedKeys]
         let dados = try codificador.encode(valor)

@@ -95,10 +95,14 @@ final class AudioTests: XCTestCase {
     }
 
     func testOsDoisMetodosDeSinteseFuncionamPorSi() throws {
-        for (nome, metodo) in [("AVSpeech", TextoFalado.sintetizarComAVSpeech), ("say", TextoFalado.sintetizarComSay)] {
+        var metodos: [(String, (String, String) throws -> [Int16])] = [("AVSpeech", TextoFalado.sintetizarComAVSpeech)]
+        #if os(macOS)
+        metodos.append(("say", TextoFalado.sintetizarComSay))          // o `say` só existe no macOS
+        #endif
+        for (nome, metodo) in metodos {
             let pcm: [Int16]
             do { pcm = try metodo("Boa noite", TextoFalado.vozPadrao) }
-            catch { throw XCTSkip("\(nome) indisponível neste Mac: \(error)") }
+            catch { throw XCTSkip("\(nome) indisponível neste aparelho: \(error)") }
             let segundos = Double(pcm.count) / Som.taxa
             XCTAssertGreaterThan(segundos, 0.3, nome)
             XCTAssertLessThan(segundos, 4, nome)

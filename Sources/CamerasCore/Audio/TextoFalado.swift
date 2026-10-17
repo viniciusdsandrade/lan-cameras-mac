@@ -80,7 +80,11 @@ public enum TextoFalado {
     }
 
     /// Plano B: o comando `say` do macOS. O texto vai como argumento depois de `--`, sem shell.
+    /// Fora do macOS não existe: sobra só o `AVSpeechSynthesizer`.
     static func sintetizarComSay(_ texto: String, _ voz: String) throws -> [Int16] {
+        #if !os(macOS)
+        throw Falha.falhou("o comando say só existe no macOS")
+        #else
         let arquivo = FileManager.default.temporaryDirectory.appendingPathComponent("voz-\(UUID().uuidString).aiff")
         defer { try? FileManager.default.removeItem(at: arquivo) }
         let p = Process()
@@ -99,6 +103,7 @@ public enum TextoFalado {
         }
         try lido.read(into: buffer)
         return try converter([buffer])
+        #endif
     }
 
     /// Qualquer formato de áudio para PCM de 16 bits, 8 kHz, mono.
