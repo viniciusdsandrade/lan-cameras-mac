@@ -14,7 +14,13 @@ enum SessaoDeAudio {
             if usuarios == 0 {
                 let s = AVAudioSession.sharedInstance()
                 // alto-falante de baixo, não o do ouvido; fones Bluetooth servem para ouvir e falar
-                try s.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
+                // (o SDK do iOS 26 renomeou a opção; os anteriores só conhecem o nome antigo)
+                #if compiler(>=6.2)
+                let bluetooth = AVAudioSession.CategoryOptions.allowBluetoothHFP
+                #else
+                let bluetooth = AVAudioSession.CategoryOptions.allowBluetooth
+                #endif
+                try s.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, bluetooth])
                 try s.setActive(true)
             }
             usuarios += 1
