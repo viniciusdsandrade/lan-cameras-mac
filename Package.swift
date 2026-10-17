@@ -16,6 +16,7 @@ let package = Package(
         .executableTarget(name: "CamerasApp", dependencies: ["CamerasCore"]),
         // Ferramenta de linha de comando para testar vídeo e protocolos sem interface.
         .executableTarget(name: "CamSpike", dependencies: ["CamerasCore"]),
-        .testTarget(name: "CamerasCoreTests", dependencies: ["CamerasCore"]),
+        .testTarget(name: "CamerasCoreTests", dependencies: ["CamerasCore"],
+                    resources: [.copy("Fixtures")]),
     ]
 )
