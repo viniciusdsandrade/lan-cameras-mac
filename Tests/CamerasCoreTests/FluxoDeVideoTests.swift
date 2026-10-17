@@ -77,8 +77,55 @@ final class FluxoDeVideoTests: XCTestCase {
         }
     }
 
+    // MARK: - Recuperação
+
+    func testConexaoQueCaiVoltaSozinhaEMostraImagemDeNovo() throws {
+        let quadros = try Amostras.quadros(h265: false)
+        let pacotes = Empacotador.h264(quadros)
+        // a primeira conexão morre no meio do vídeo (depois do primeiro quadro-chave); a segunda é completa
+        let servidor = try ServidorRTSPFalso(sdp: try sdp(h265: false), pacotesDeVideo: pacotes, cortarPrimeiraConexaoApos: pacotes.count / 3)
+        servidor.iniciar()
+        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo")
+        let estados = Estados()
+        fluxo.aoMudarEstado = { estados.registrar($0) }
+        fluxo.iniciar()
+        defer { fluxo.parar() }
+
+        XCTAssertTrue(esperar(ate: 15) { servidor.conexoes >= 2 && estados.viu { if case .aoVivo = $0 { return true } else { return false } } && fluxo.quadrosRecebidos >= 20 },
+                      "conexões: \(servidor.conexoes), quadros: \(fluxo.quadrosRecebidos)")
+        XCTAssertGreaterThanOrEqual(servidor.conexoes, 2, "deveria ter reconectado")
+        let sequencia = estados.lista.map { e -> String in
+            switch e { case .conectando: return "conectando"; case .aoVivo: return "aoVivo"; case .erro: return "erro"; case .parado: return "parado" }
+        }
+        XCTAssertTrue(sequencia.contains("erro"), "a queda deveria aparecer como erro: \(sequencia)")
+        let primeiroErro = try XCTUnwrap(sequencia.firstIndex(of: "erro"))
+        XCTAssertTrue(sequencia[primeiroErro...].contains("conectando"), "depois do erro deveria tentar de novo: \(sequencia)")
+        XCTAssertTrue(sequencia[primeiroErro...].contains("aoVivo"), "e voltar a mostrar imagem: \(sequencia)")
+    }
+
+    func testCameraQuePassaAMudaSemFecharAConexaoEhDetectadaEReconecta() throws {
+        let quadros = try Amostras.quadros(h265: false)
+        let pacotes = Empacotador.h264(quadros)
+        let servidor = try ServidorRTSPFalso(sdp: try sdp(h265: false), pacotesDeVideo: pacotes, calarPrimeiraConexaoApos: pacotes.count / 3)
+        servidor.iniciar()
+        // o limite padrão é 8 s: reduzido para o teste, o mecanismo é o mesmo
+        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo", limiteSemVideo: 1.5)
+        fluxo.iniciar()
+        defer { fluxo.parar() }
+        XCTAssertTrue(esperar(ate: 20) { servidor.conexoes >= 2 && fluxo.quadrosRecebidos >= 20 },
+                      "conexões: \(servidor.conexoes), quadros: \(fluxo.quadrosRecebidos)")
+    }
+
     func testURLInvalidaNaoCria() {
         XCTAssertNil(RTSPClient(url: "http://127.0.0.1/x"))
         XCTAssertNil(RTSPClient(url: "isso nao e url"))
     }
+}
+
+final class Estados: @unchecked Sendable {
+    private let trava = NSLock()
+    private var _lista: [FluxoDeVideo.Estado] = []
+    func registrar(_ e: FluxoDeVideo.Estado) { trava.withLock { _lista.append(e) } }
+    var lista: [FluxoDeVideo.Estado] { trava.withLock { _lista } }
+    func viu(_ f: (FluxoDeVideo.Estado) -> Bool) -> Bool { lista.contains(where: f) }
 }

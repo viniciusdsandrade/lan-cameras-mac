@@ -11,13 +11,21 @@ final class ServidorRTSPFalso: @unchecked Sendable {
     private let sdp: String
     private let pacotesDeVideo: [[UInt8]]
     private let audioAntesDoPlay: [[UInt8]]
+    /// Na PRIMEIRA conexão, corta a conexão depois de mandar tantos pacotes (a rede caiu).
+    private let cortarPrimeiraConexaoApos: Int?
+    /// Na PRIMEIRA conexão, para de mandar vídeo (sem fechar) depois de tantos pacotes (a câmera travou).
+    private let calarPrimeiraConexaoApos: Int?
     private let trava = NSLock()
     private var _metodos: [String] = []
+    private var _conexoes = 0
 
-    init(sdp: String, pacotesDeVideo: [[UInt8]], audioAntesDoPlay: [[UInt8]] = []) throws {
+    init(sdp: String, pacotesDeVideo: [[UInt8]], audioAntesDoPlay: [[UInt8]] = [],
+         cortarPrimeiraConexaoApos: Int? = nil, calarPrimeiraConexaoApos: Int? = nil) throws {
         self.sdp = sdp
         self.pacotesDeVideo = pacotesDeVideo
         self.audioAntesDoPlay = audioAntesDoPlay
+        self.cortarPrimeiraConexaoApos = cortarPrimeiraConexaoApos
+        self.calarPrimeiraConexaoApos = calarPrimeiraConexaoApos
 
         let s = socket(AF_INET, SOCK_STREAM, 0)
         guard s >= 0 else { throw Falha(motivo: "socket") }
@@ -42,6 +50,7 @@ final class ServidorRTSPFalso: @unchecked Sendable {
     }
 
     var metodos: [String] { trava.withLock { _metodos } }
+    var conexoes: Int { trava.withLock { _conexoes } }
 
     func iniciar() {
         let t = Thread { [self] in servir() }
@@ -54,9 +63,16 @@ final class ServidorRTSPFalso: @unchecked Sendable {
     // MARK: -
 
     private func servir() {
-        let c = accept(escuta, nil, nil)
-        guard c >= 0 else { return }
-        defer { close(c); close(escuta) }
+        while true {
+            let c = accept(escuta, nil, nil)
+            if c < 0 { return }
+            let numero = trava.withLock { () -> Int in _conexoes += 1; return _conexoes }
+            atender(c, primeira: numero == 1)
+            close(c)
+        }
+    }
+
+    private func atender(_ c: Int32, primeira: Bool) {
         var buf = [UInt8]()
         var setups = 0
         while let req = lerRequisicao(c, &buf) {
@@ -83,8 +99,12 @@ final class ServidorRTSPFalso: @unchecked Sendable {
             case "PLAY":
                 for p in audioAntesDoPlay { enviarQuadro(c, canal: 2, p) }
                 enviar(c, resposta(cseq, ["Session: \(1000 + setups)", "Range: npt=now-"]))
+                var enviados = 0
                 for p in pacotesDeVideo {
+                    if primeira, let n = cortarPrimeiraConexaoApos, enviados >= n { return }        // fecha a conexão
+                    if primeira, let n = calarPrimeiraConexaoApos, enviados >= n { break }          // fica mudo, conexão aberta
                     enviarQuadro(c, canal: 0, p)
+                    enviados += 1
                     usleep(1500)
                 }
             case "TEARDOWN":

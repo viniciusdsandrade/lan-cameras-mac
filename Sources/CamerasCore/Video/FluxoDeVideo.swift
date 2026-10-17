@@ -34,6 +34,7 @@ public final class FluxoDeVideo: @unchecked Sendable {
 
     private let url: String
     private let incluirAudio: Bool
+    private let limiteSemVideo: TimeInterval
 
     private let trava = NSLock()
     private var rodando = false
@@ -47,9 +48,11 @@ public final class FluxoDeVideo: @unchecked Sendable {
     private let _aoMudarEstado = Caixa<(@Sendable (Estado) -> Void)?>(nil)
     private let _aoReceberAudio = Caixa<(@Sendable (RTPPacket) -> Void)?>(nil)
 
-    public init(url: String, incluirAudio: Bool = false) {
+    /// `limiteSemVideo`: segundos sem nenhum quadro de vídeo que contam como câmera travada (reconecta).
+    public init(url: String, incluirAudio: Bool = false, limiteSemVideo: TimeInterval = 8) {
         self.url = url
         self.incluirAudio = incluirAudio
+        self.limiteSemVideo = limiteSemVideo
     }
 
     public var estado: Estado { _estado.valor }
@@ -117,6 +120,7 @@ public final class FluxoDeVideo: @unchecked Sendable {
             mudar(.erro("o endereço da câmera é inválido"))
             return false
         }
+        cli.limiteSemVideo = limiteSemVideo
         trava.withLock { cliente = cli }
         _quadros.valor = 0
         let sessao = SessaoDeDecodificacao()
