@@ -15,17 +15,21 @@ final class ServidorRTSPFalso: @unchecked Sendable {
     private let cortarPrimeiraConexaoApos: Int?
     /// Na PRIMEIRA conexão, para de mandar vídeo (sem fechar) depois de tantos pacotes (a câmera travou).
     private let calarPrimeiraConexaoApos: Int?
+    /// Status da resposta ao DESCRIBE: 401 é a câmera recusando o usuário e a senha da URL.
+    private let statusDoDescribe: Int
     private let trava = NSLock()
     private var _metodos: [String] = []
     private var _conexoes = 0
 
     init(sdp: String, pacotesDeVideo: [[UInt8]], audioAntesDoPlay: [[UInt8]] = [],
-         cortarPrimeiraConexaoApos: Int? = nil, calarPrimeiraConexaoApos: Int? = nil) throws {
+         cortarPrimeiraConexaoApos: Int? = nil, calarPrimeiraConexaoApos: Int? = nil,
+         statusDoDescribe: Int = 200) throws {
         self.sdp = sdp
         self.pacotesDeVideo = pacotesDeVideo
         self.audioAntesDoPlay = audioAntesDoPlay
         self.cortarPrimeiraConexaoApos = cortarPrimeiraConexaoApos
         self.calarPrimeiraConexaoApos = calarPrimeiraConexaoApos
+        self.statusDoDescribe = statusDoDescribe
 
         let s = socket(AF_INET, SOCK_STREAM, 0)
         guard s >= 0 else { throw Falha(motivo: "socket") }
@@ -88,6 +92,8 @@ final class ServidorRTSPFalso: @unchecked Sendable {
             switch metodo {
             case "OPTIONS":
                 enviar(c, resposta(cseq, ["Public: OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN"]))
+            case "DESCRIBE" where statusDoDescribe != 200:
+                enviar(c, resposta(cseq, [], status: "\(statusDoDescribe) Recusado"))
             case "DESCRIBE":
                 enviar(c, resposta(cseq, ["Content-Type: application/sdp",
                                           "Content-Base: rtsp://127.0.0.1:\(porta)/fluxo/",
@@ -115,8 +121,8 @@ final class ServidorRTSPFalso: @unchecked Sendable {
         }
     }
 
-    private func resposta(_ cseq: String, _ cabecalhos: [String], corpo: String = "") -> [UInt8] {
-        var t = "RTSP/1.0 200 OK\r\nCseq: \(cseq)\r\nServer: falso\r\n"
+    private func resposta(_ cseq: String, _ cabecalhos: [String], corpo: String = "", status: String = "200 OK") -> [UInt8] {
+        var t = "RTSP/1.0 \(status)\r\nCseq: \(cseq)\r\nServer: falso\r\n"
         for h in cabecalhos { t += h + "\r\n" }
         t += "\r\n" + corpo
         return Array(t.utf8)

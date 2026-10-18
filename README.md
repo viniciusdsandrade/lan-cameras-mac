@@ -17,6 +17,11 @@ do fabricante.
 - Luz branca (automática, ligada, desligada) e rastreio automático.
 - Ouvir a câmera, falar por ela ao vivo, tocar sons prontos e texto falado.
 - Foto da lente atual.
+- Senha ou endereço trocados: se o app do fabricante (iCSee, XMEye) trocar a senha de uma
+  câmera, ou o roteador mudar o endereço dela, o app percebe quando ela recusa a senha guardada,
+  pega os dados novos com a própria câmera e reabre só as conexões dela. O vídeo não fica
+  tentando de novo com a senha recusada (as câmeras podem bloquear a conta depois de várias
+  tentativas erradas).
 
 ## Usar
 

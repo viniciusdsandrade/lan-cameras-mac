@@ -1,7 +1,8 @@
 import Foundation
 
 /// Vídeo ao vivo de um fluxo RTSP de uma câmera: conecta, decodifica e, se a
-/// conexão cair, tenta de novo com espera crescente (1, 2, 4, 8 e 10 s).
+/// conexão cair, tenta de novo com espera crescente (1, 2, 4, 8 e 10 s). Se a câmera
+/// recusar o usuário e a senha, não tenta de novo: avisa por `aoRecusarCredenciais`.
 ///
 /// Cada instância ocupa UMA sessão RTSP na câmera (elas aguentam poucas);
 /// `parar()` libera a sessão. Os ouvintes são chamados de threads internas.
@@ -47,6 +48,7 @@ public final class FluxoDeVideo: @unchecked Sendable {
     private let _aoReceberQuadro = Caixa<(@Sendable (QuadroDecodificado) -> Void)?>(nil)
     private let _aoMudarEstado = Caixa<(@Sendable (Estado) -> Void)?>(nil)
     private let _aoReceberAudio = Caixa<(@Sendable (RTPPacket) -> Void)?>(nil)
+    private let _aoRecusarCredenciais = Caixa<(@Sendable () -> Void)?>(nil)
 
     /// `limiteSemVideo`: segundos sem nenhum quadro de vídeo que contam como câmera travada (reconecta).
     public init(url: String, incluirAudio: Bool = false, limiteSemVideo: TimeInterval = 8) {
@@ -70,6 +72,11 @@ public final class FluxoDeVideo: @unchecked Sendable {
     public var aoReceberAudio: (@Sendable (RTPPacket) -> Void)? {
         get { _aoReceberAudio.valor }
         set { _aoReceberAudio.valor = newValue }
+    }
+    /// A câmera recusou o usuário e a senha da URL. Chega depois do estado de erro, uma vez só.
+    public var aoRecusarCredenciais: (@Sendable () -> Void)? {
+        get { _aoRecusarCredenciais.valor }
+        set { _aoRecusarCredenciais.valor = newValue }
     }
 
     public func iniciar() {
@@ -102,28 +109,38 @@ public final class FluxoDeVideo: @unchecked Sendable {
         _aoMudarEstado.valor?(novo)
     }
 
+    private enum Desfecho { case comQuadros, semQuadros, credenciaisRecusadas }
+
     private func laco() {
         var espera = 1.0
         while estaRodando() {
             mudar(.conectando)
-            let teveQuadros = executarUmaSessao()
+            let desfecho = executarUmaSessao()
             if !estaRodando() { break }
-            espera = teveQuadros ? 1 : min(espera * 2, 10)
+            if desfecho == .credenciaisRecusadas {
+                // Com a mesma senha a resposta seria a mesma, e insistir pode fazer a câmera bloquear
+                // a conta: o erro fica na tela até quem abriu o fluxo pará-lo (e abrir outro, com a nova).
+                _aoRecusarCredenciais.valor?()
+                while estaRodando() { _ = acordar.wait(timeout: .now() + 60) }
+                break
+            }
+            espera = desfecho == .comQuadros ? 1 : min(espera * 2, 10)
             _ = acordar.wait(timeout: .now() + espera)
         }
         mudar(.parado)
     }
 
-    /// Roda uma conexão até ela terminar. Devolve se chegou ao menos um quadro.
-    private func executarUmaSessao() -> Bool {
+    /// Roda uma conexão até ela terminar e diz como terminou.
+    private func executarUmaSessao() -> Desfecho {
         guard let cli = RTSPClient(url: url) else {
             mudar(.erro("o endereço da câmera é inválido"))
-            return false
+            return .semQuadros
         }
         cli.limiteSemVideo = limiteSemVideo
         trava.withLock { cliente = cli }
         _quadros.valor = 0
         let sessao = SessaoDeDecodificacao()
+        var recusou = false
         do {
             try cli.executar(
                 incluirAudio: incluirAudio,
@@ -135,9 +152,11 @@ public final class FluxoDeVideo: @unchecked Sendable {
                 aoReceberAudio: { [self] p in _aoReceberAudio.valor?(p) })
         } catch {
             if estaRodando() { mudar(.erro(Self.resumo(error))) }
+            recusou = (error as? RTSPErro)?.credenciaisRecusadas == true
         }
         sessao.encerrar()
-        return _quadros.valor > 0
+        if recusou { return .credenciaisRecusadas }
+        return _quadros.valor > 0 ? .comQuadros : .semQuadros
     }
 
     private func quandoChegarQuadro(_ q: QuadroDecodificado) {

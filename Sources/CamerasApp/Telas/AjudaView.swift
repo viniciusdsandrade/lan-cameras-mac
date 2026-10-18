@@ -21,6 +21,8 @@ struct AjudaView: View {
                           "\"Salvar posição atual\" guarda para onde a câmera aponta. O app só apaga as posições que ele mesmo criou; as que já vinham na câmera ficam intactas.")
                     bloco("Som",
                           "\"Ouvir\" liga o som da câmera (tecla M). \"Falar\" usa o microfone do Mac e a câmera repete no alto-falante dela; enquanto você fala o som da câmera fica mudo para não dar eco. Há também sons prontos e texto falado. A câmera só aceita uma fala por vez, e o volume começa em 30%: o alto-falante é alto.")
+                    bloco("Senha das câmeras",
+                          "Você não digita senha: o app pega o usuário e a senha com a própria câmera. Se o app do fabricante (iCSee, XMEye) trocar a senha dela, ou o roteador mudar o endereço, o app percebe e pega os novos sozinho. Se mesmo assim a imagem não voltar, use Câmeras > Procurar câmeras na rede.")
                     bloco("Permissões do macOS",
                           "Rede local: necessária para falar com as câmeras. Microfone: só quando você usa \"Falar\". Se negou sem querer, libere em Ajustes do Sistema > Privacidade e Segurança.")
                     bloco("Privacidade",

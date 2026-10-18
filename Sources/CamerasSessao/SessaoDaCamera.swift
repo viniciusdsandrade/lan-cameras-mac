@@ -50,6 +50,7 @@ public final class SessaoDaCamera: ObservableObject {
         presetsDoApp = controle.presetsCriadosPeloApp()
         let escuta = self.escuta
         video.definirOuvinteDeAudio { escuta.empurrar($0) }
+        video.aoRecusarCredenciais = { [weak modelo] in modelo?.renovarCredenciais(de: camera) }
         video.iniciar()
         tarefaDeEstado = Task { [weak self] in await self?.cicloDeEstado() }
     }

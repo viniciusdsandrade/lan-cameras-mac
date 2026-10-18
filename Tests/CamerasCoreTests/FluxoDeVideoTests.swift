@@ -116,6 +116,40 @@ final class FluxoDeVideoTests: XCTestCase {
                       "conexões: \(servidor.conexoes), quadros: \(fluxo.quadrosRecebidos)")
     }
 
+    // MARK: - Senha recusada
+
+    func testCameraQueRecusaASenhaAvisaUmaVezENaoInsiste() throws {
+        let servidor = try ServidorRTSPFalso(sdp: try sdp(h265: false), pacotesDeVideo: [], statusDoDescribe: 401)
+        servidor.iniciar()
+        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo")
+        let recusas = Contador()
+        fluxo.aoRecusarCredenciais = { recusas.incrementar() }
+        fluxo.iniciar()
+        defer { fluxo.parar() }
+
+        XCTAssertTrue(esperar(ate: 5) { recusas.valor == 1 }, "deveria avisar que a câmera recusou a senha")
+        guard case .erro(let mensagem) = fluxo.estado else { return XCTFail("estado inesperado: \(fluxo.estado)") }
+        XCTAssertTrue(mensagem.contains("recusou o usuário ou a senha (401)"), mensagem)
+        Thread.sleep(forTimeInterval: 3)                       // sem a recusa, tentaria de novo em 2 s
+        XCTAssertEqual(servidor.conexoes, 1, "com a mesma senha não deveria tentar de novo")
+        XCTAssertEqual(recusas.valor, 1)
+
+        fluxo.parar()
+        XCTAssertTrue(esperar(ate: 3) { fluxo.estado == .parado }, "parar() deveria soltar o fluxo parado no erro")
+    }
+
+    func testSo401E403ContamComoSenhaRecusada() throws {
+        for (status, recusada) in [(401, true), (403, true), (404, false), (503, false)] {
+            let servidor = try ServidorRTSPFalso(sdp: try sdp(h265: false), pacotesDeVideo: [], statusDoDescribe: status)
+            servidor.iniciar()
+            defer { servidor.encerrar() }
+            let cliente = try XCTUnwrap(RTSPClient(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo"))
+            XCTAssertThrowsError(try cliente.executar(incluirAudio: false, aoFicarPronto: { _ in }, aoReceberVideo: { _ in })) { erro in
+                XCTAssertEqual((erro as? RTSPErro)?.credenciaisRecusadas, recusada, "\(status): \(erro)")
+            }
+        }
+    }
+
     func testURLInvalidaNaoCria() {
         XCTAssertNil(RTSPClient(url: "http://127.0.0.1/x"))
         XCTAssertNil(RTSPClient(url: "isso nao e url"))

@@ -20,8 +20,22 @@ final class ModeloDoAppTests: XCTestCase {
         try? FileManager.default.removeItem(at: pasta)
     }
 
-    private func modelo(_ argumentos: [String] = []) -> ModeloDoApp {
-        ModeloDoApp(armazenamento: ArmazenamentoDeCameras(pasta: pasta), argumentos: argumentos, observarCicloDeVida: false)
+    /// `reidentificar`: o que a câmera responde quando o app pede de novo os dados dela (por padrão,
+    /// que sumiu: os testes nunca saem procurando na rede de verdade).
+    private func modelo(_ argumentos: [String] = [],
+                        reidentificar: @escaping @Sendable (CameraConfig) throws -> CameraConfig = { _ in throw Cadastro.Falha.cameraSumiu }) -> ModeloDoApp {
+        ModeloDoApp(armazenamento: ArmazenamentoDeCameras(pasta: pasta), argumentos: argumentos, observarCicloDeVida: false,
+                    reidentificar: reidentificar)
+    }
+
+    /// Espera o que o modelo faz em segundo plano (as tarefas dele voltam para a thread principal).
+    private func esperar(ate segundos: Double = 3, _ condicao: () -> Bool) async -> Bool {
+        let limite = Date().addingTimeInterval(segundos)
+        while Date() < limite {
+            if condicao() { return true }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return condicao()
     }
 
     func testVisaoGeralAbreUmaSessaoLevePorCameraEATelaDaCameraSoUma() {
@@ -98,6 +112,91 @@ final class ModeloDoAppTests: XCTestCase {
         outro.pausar()
     }
 
+    // MARK: - Senha ou endereço trocados
+
+    func testCameraQueRecusaASenhaGanhaASenhaNovaESoElaReabre() async throws {
+        let m = modelo(reidentificar: { c in
+            var nova = c
+            nova.hash = "senha-nova"
+            return nova
+        })
+        let antes = m.sessoesGerais
+        let terceira = try XCTUnwrap(antes["SERIE-FALSA-3"])
+        terceira.aoRecusarCredenciais?()                     // o que o fluxo faz quando a câmera responde 401
+        let renovou = await esperar { m.camera(id: "SERIE-FALSA-3")?.hash == "senha-nova" }
+        XCTAssertTrue(renovou)
+        XCTAssertEqual(try ArmazenamentoDeCameras(pasta: pasta).carregar().map(\.hash), ["x", "x", "senha-nova"], "a senha nova fica guardada")
+        XCTAssertEqual(m.cameras.map(\.nome), ["Câmera 1", "Câmera 2", "Câmera 3"], "nome e ordem não mudam")
+        let reaberta = try XCTUnwrap(m.sessoesGerais["SERIE-FALSA-3"])
+        XCTAssertFalse(reaberta === terceira, "a sessão da câmera é reaberta com a senha nova")
+        XCTAssertEqual(reaberta.camera.hash, "senha-nova")
+        XCTAssertTrue(m.sessoesGerais["SERIE-FALSA-1"] === antes["SERIE-FALSA-1"], "as outras câmeras seguem como estavam")
+        XCTAssertTrue(m.sessoesGerais["SERIE-FALSA-2"] === antes["SERIE-FALSA-2"])
+        XCTAssertEqual(m.aviso?.texto, "Câmera 3 tinha trocado de senha: já peguei a nova.")
+        m.pausar()
+    }
+
+    func testNaTelaDaCameraASessaoTambemReabreNoEnderecoNovo() async throws {
+        let m = modelo(reidentificar: { c in
+            var nova = c
+            nova.host = "192.0.2.30"
+            nova.hash = "senha-nova"
+            return nova
+        })
+        m.selecionar(.camera("SERIE-FALSA-2"))
+        let antiga = try XCTUnwrap(m.sessaoDaCamera)
+        antiga.video.aoRecusarCredenciais?()
+        let reabriu = await esperar { m.sessaoDaCamera != nil && m.sessaoDaCamera !== antiga }
+        XCTAssertTrue(reabriu)
+        XCTAssertEqual(m.sessaoDaCamera?.camera.host, "192.0.2.30")
+        XCTAssertEqual(m.camera(id: "SERIE-FALSA-2")?.host, "192.0.2.30")
+        XCTAssertEqual(m.selecao, .camera("SERIE-FALSA-2"), "continua na mesma tela")
+        XCTAssertEqual(m.aviso?.texto, "Câmera 2 tinha mudado de endereço na rede: já atualizei.")
+        m.pausar()
+    }
+
+    func testSenhaQueACameraRepeteNaoReabreNada() async throws {
+        let m = modelo(reidentificar: { $0 })                  // a câmera devolve o que já estava guardado
+        let antiga = try XCTUnwrap(m.sessoesGerais["SERIE-FALSA-1"])
+        antiga.aoRecusarCredenciais?()
+        let avisou = await esperar { m.aviso?.tipo == .erro }
+        XCTAssertTrue(avisou)
+        XCTAssertEqual(m.aviso?.texto, "Câmera 1 recusou a senha que ela mesma informa. Tente de novo daqui a alguns minutos.")
+        XCTAssertTrue(m.sessoesGerais["SERIE-FALSA-1"] === antiga, "insistir com a senha recusada pode bloquear a conta")
+        m.pausar()
+    }
+
+    func testFalhaAoPegarASenhaAvisaSemMexerNoQueEstaGuardado() async throws {
+        let m = modelo()
+        let antiga = try XCTUnwrap(m.sessoesGerais["SERIE-FALSA-1"])
+        antiga.aoRecusarCredenciais?()
+        let avisou = await esperar { m.aviso?.tipo == .erro }
+        XCTAssertTrue(avisou)
+        XCTAssertEqual(m.aviso?.texto, "Câmera 1 não aceitou a senha guardada e não consegui pegar a atual: "
+                       + "ela não está mais no endereço guardado e não apareceu na rede")
+        XCTAssertEqual(try ArmazenamentoDeCameras(pasta: pasta).carregar().map(\.hash), ["x", "x", "x"])
+        XCTAssertTrue(m.sessoesGerais["SERIE-FALSA-1"] === antiga)
+        m.pausar()
+    }
+
+    func testCadaCameraTemUmaRenovacaoDeCadaVez() async throws {
+        let chamadas = Contagem()
+        let m = modelo(reidentificar: { c in
+            chamadas.somar()
+            Thread.sleep(forTimeInterval: 0.3)
+            var nova = c
+            nova.hash = "senha-nova"
+            return nova
+        })
+        let s = try XCTUnwrap(m.sessoesGerais["SERIE-FALSA-1"])
+        s.aoRecusarCredenciais?()
+        s.aoRecusarCredenciais?()                              // a câmera pode recusar de novo antes de a primeira acabar
+        let renovou = await esperar { m.camera(id: "SERIE-FALSA-1")?.hash == "senha-nova" }
+        XCTAssertTrue(renovou)
+        XCTAssertEqual(chamadas.valor, 1)
+        m.pausar()
+    }
+
     func testZoomFicaNosLimitesEAmpliaEmVoltaDoPonto() {
         let z = EstadoDeZoom()
         z.definir(9)
@@ -128,4 +227,12 @@ final class ModeloDoAppTests: XCTestCase {
         let data = Date(timeIntervalSince1970: 0)
         XCTAssertEqual(Plataforma.carimbo(data).count, "yyyyMMdd-HHmmss".count)
     }
+}
+
+/// Conta chamadas que chegam de outras threads.
+private final class Contagem: @unchecked Sendable {
+    private let trava = NSLock()
+    private var n = 0
+    func somar() { trava.withLock { n += 1 } }
+    var valor: Int { trava.withLock { n } }
 }

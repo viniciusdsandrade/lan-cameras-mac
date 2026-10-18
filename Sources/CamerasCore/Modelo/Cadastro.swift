@@ -9,6 +9,16 @@ public enum Cadastro {
         public var falhas: [String] = []
     }
 
+    public enum Falha: Error, CustomStringConvertible {
+        case cameraSumiu
+
+        public var description: String {
+            switch self {
+            case .cameraSumiu: return "ela não está mais no endereço guardado e não apareceu na rede"
+            }
+        }
+    }
+
     /// Lê o número de série, o modelo e as credenciais de uma câmera.
     public static func identificar(host: String, porta: UInt16 = 8899, nome: String? = nil) throws -> CameraConfig {
         let cliente = ONVIFClient(host: host, porta: porta)
@@ -16,6 +26,27 @@ public enum Cadastro {
         let cred = try cliente.credenciais()
         return CameraConfig(id: info.serie, nome: nome ?? "Câmera", host: host,
                             usuario: cred.usuario, hash: cred.hash, modelo: info.modelo)
+    }
+
+    /// Pega de novo, da própria câmera, o endereço e as credenciais de uma câmera já guardada: o app
+    /// do fabricante (iCSee, XMEye) pode trocar a senha dela, e o roteador, o endereço. Pergunta
+    /// primeiro no endereço guardado; se lá não estiver a mesma câmera (o número de série não muda),
+    /// procura na rede. Nome, ordem e lentes ficam como estavam.
+    public static func reidentificar(_ camera: CameraConfig, porta: UInt16 = 8899,
+                                     procurar: () throws -> Resultado = { try Cadastro.procurarNaRede() }) throws -> CameraConfig {
+        var nova = camera
+        let cliente = ONVIFClient(host: camera.host, porta: porta)
+        if let info = try? cliente.informacoes(), info.serie == camera.id {
+            let cred = try cliente.credenciais()         // é ela: se não entregar a senha, procurar não adianta
+            nova.usuario = cred.usuario
+            nova.hash = cred.hash
+            return nova
+        }
+        guard let achada = try procurar().cameras.first(where: { $0.id == camera.id }) else { throw Falha.cameraSumiu }
+        nova.host = achada.host
+        nova.usuario = achada.usuario
+        nova.hash = achada.hash
+        return nova
     }
 
     /// Procura câmeras por WS-Discovery e identifica cada uma.

@@ -10,6 +10,9 @@ public final class SessaoDeVideo: ObservableObject {
     public let stream: StreamDeVideo
     public let distribuidor = DistribuidorDeQuadros()
     @Published public private(set) var estado: FluxoDeVideo.Estado = .parado
+    /// A câmera recusou o usuário e a senha guardados e o fluxo parou de tentar: quem abriu a
+    /// sessão decide o que fazer (o modelo pega a senha atual com a própria câmera).
+    public var aoRecusarCredenciais: (@MainActor () -> Void)?
     private let fluxo: FluxoDeVideo
 
     public init(camera: CameraConfig, stream: StreamDeVideo, comAudio: Bool = false) {
@@ -22,6 +25,9 @@ public final class SessaoDeVideo: ObservableObject {
         fluxo.aoMudarEstado = { [weak self] novo in
             Depuracao.registrar("\(rotulo): \(novo)")
             Task { @MainActor in self?.estado = novo }
+        }
+        fluxo.aoRecusarCredenciais = { [weak self] in
+            Task { @MainActor in self?.aoRecusarCredenciais?() }
         }
     }
 

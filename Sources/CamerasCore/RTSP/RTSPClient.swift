@@ -2,8 +2,13 @@ import Foundation
 
 public struct RTSPErro: Error, CustomStringConvertible, Sendable {
     public let descricao: String
+    /// A câmera recusou o usuário e a senha da URL (401/403): com eles, tentar de novo não adianta.
+    public let credenciaisRecusadas: Bool
     /// A mensagem passa por `Redact`: a URL das câmeras carrega usuário e senha.
-    public init(_ d: String) { descricao = Redact.texto(d) }
+    public init(_ d: String, credenciaisRecusadas: Bool = false) {
+        descricao = Redact.texto(d)
+        self.credenciaisRecusadas = credenciaisRecusadas
+    }
     public var description: String { descricao }
 }
 
@@ -166,7 +171,7 @@ public final class RTSPClient: @unchecked Sendable {
 
     private func erroDeStatus(_ metodo: String, _ status: Int) -> RTSPErro {
         switch status {
-        case 401, 403: return RTSPErro("\(metodo): a câmera recusou o usuário ou a senha (\(status))")
+        case 401, 403: return RTSPErro("\(metodo): a câmera recusou o usuário ou a senha (\(status))", credenciaisRecusadas: true)
         case 404: return RTSPErro("\(metodo): a câmera não achou o fluxo pedido (404)")
         case 453, 503: return RTSPErro("\(metodo): a câmera está sem sessões livres (\(status))")
         default: return RTSPErro("\(metodo): resposta inesperada da câmera (\(status))")

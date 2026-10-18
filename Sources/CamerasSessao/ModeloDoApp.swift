@@ -32,13 +32,19 @@ public final class ModeloDoApp: ObservableObject {
     var observadores: [NSObjectProtocol] = []
     private var pausaAgendada: Task<Void, Never>?
     private let argumentos: [String]
+    private let reidentificar: @Sendable (CameraConfig) throws -> CameraConfig
+    /// Câmeras cujas credenciais estão sendo pegas de novo (uma vez por câmera de cada vez).
+    private var renovando: Set<String> = []
 
     /// `argumentos`: `--abrir NOME`, `--qualidade leve|hd`, `--zoom N` abrem direto num estado (útil em testes).
+    /// `reidentificar`: como pegar de novo os dados de uma câmera que recusou a senha (os testes trocam).
     public init(armazenamento: ArmazenamentoDeCameras = ArmazenamentoDeCameras(),
                 argumentos: [String] = ProcessInfo.processInfo.arguments,
-                observarCicloDeVida: Bool = true) {
+                observarCicloDeVida: Bool = true,
+                reidentificar: @escaping @Sendable (CameraConfig) throws -> CameraConfig = { try Cadastro.reidentificar($0) }) {
         self.armazenamento = armazenamento
         self.argumentos = argumentos
+        self.reidentificar = reidentificar
         recarregarCameras()
         aplicarArgumentos()
         ajustarSessoes()
@@ -84,6 +90,7 @@ public final class ModeloDoApp: ObservableObject {
             sessaoDaCamera = nil
             for c in cameras where sessoesGerais[c.id] == nil {
                 let s = SessaoDeVideo(camera: c, stream: .secundario)
+                s.aoRecusarCredenciais = { [weak self] in self?.renovarCredenciais(de: c) }
                 s.iniciar()
                 sessoesGerais[c.id] = s
             }
@@ -222,6 +229,54 @@ public final class ModeloDoApp: ObservableObject {
             if erros.isEmpty { avisar("Todas as câmeras paradas", .ok) }
             else { avisar(erros.map(Redact.texto).joined(separator: "; "), .erro) }
         }
+    }
+
+    // MARK: - Senha ou endereço trocados
+
+    /// A câmera recusou o usuário e a senha guardados: o app do fabricante pode trocar a senha, e o
+    /// roteador, o endereço. Pega os atuais com a própria câmera, guarda e reabre só as sessões dela.
+    /// Se ela devolver o mesmo que já estava guardado, não reabre nada: insistir com uma senha
+    /// recusada pode fazer a câmera bloquear a conta.
+    func renovarCredenciais(de camera: CameraConfig) {
+        guard !renovando.contains(camera.id) else { return }
+        renovando.insert(camera.id)
+        avisar("\(camera.nome) não aceitou a senha guardada: pegando a atual com a própria câmera…")
+        let reidentificar = self.reidentificar
+        Task {
+            let r = await Task.detached(priority: .userInitiated) { Result { try reidentificar(camera) } }.value
+            renovando.remove(camera.id)
+            switch r {
+            case .failure(let erro):
+                avisar("\(camera.nome) não aceitou a senha guardada e não consegui pegar a atual: \(Redact.texto(String(describing: erro)))", .erro)
+            case .success(let nova) where nova.host == camera.host && nova.usuario == camera.usuario && nova.hash == camera.hash:
+                avisar("\(camera.nome) recusou a senha que ela mesma informa. Tente de novo daqui a alguns minutos.", .erro)
+            case .success(let nova):
+                do {
+                    try armazenamento.atualizar(camera.id) {
+                        $0.host = nova.host
+                        $0.usuario = nova.usuario
+                        $0.hash = nova.hash
+                    }
+                } catch {
+                    avisar("Não consegui guardar os dados novos de \(camera.nome): \(error.localizedDescription)", .erro)
+                    return
+                }
+                recarregarCameras()
+                reabrirSessoes(de: camera.id)
+                avisar(nova.host == camera.host ? "\(camera.nome) tinha trocado de senha: já peguei a nova."
+                                                : "\(camera.nome) tinha mudado de endereço na rede: já atualizei.", .ok)
+            }
+        }
+    }
+
+    /// Fecha e reabre só as sessões de uma câmera (os dados dela mudaram); as outras seguem como estão.
+    private func reabrirSessoes(de id: String) {
+        sessoesGerais.removeValue(forKey: id)?.parar()
+        if sessaoDaCamera?.camera.id == id {
+            sessaoDaCamera?.encerrar()
+            sessaoDaCamera = nil
+        }
+        ajustarSessoes()
     }
 
     // MARK: - Avisos
