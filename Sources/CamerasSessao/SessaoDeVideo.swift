@@ -13,6 +13,10 @@ public final class SessaoDeVideo: ObservableObject {
     /// A câmera recusou o usuário e a senha guardados e o fluxo parou de tentar: quem abriu a
     /// sessão decide o que fazer (o modelo pega a senha atual com a própria câmera).
     public var aoRecusarCredenciais: (@MainActor () -> Void)?
+    /// A câmera não responde no endereço guardado (várias conexões seguidas sem imagem) e o fluxo segue
+    /// tentando: quem abriu a sessão pode procurá-la na rede. `primeiraVez` é falso nos avisos que se
+    /// repetem enquanto ela não voltar.
+    public var aoNaoResponder: (@MainActor (_ primeiraVez: Bool) -> Void)?
     private let fluxo: FluxoDeVideo
 
     public init(camera: CameraConfig, stream: StreamDeVideo, comAudio: Bool = false) {
@@ -28,6 +32,9 @@ public final class SessaoDeVideo: ObservableObject {
         }
         fluxo.aoRecusarCredenciais = { [weak self] in
             Task { @MainActor in self?.aoRecusarCredenciais?() }
+        }
+        fluxo.aoNaoResponder = { [weak self] primeiraVez in
+            Task { @MainActor in self?.aoNaoResponder?(primeiraVez) }
         }
     }
 

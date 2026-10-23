@@ -37,7 +37,8 @@ public final class ModeloDoApp: ObservableObject {
     private var renovando: Set<String> = []
 
     /// `argumentos`: `--abrir NOME`, `--qualidade leve|hd`, `--zoom N` abrem direto num estado (útil em testes).
-    /// `reidentificar`: como pegar de novo os dados de uma câmera que recusou a senha (os testes trocam).
+    /// `reidentificar`: como pegar de novo os dados de uma câmera que recusou a senha ou parou de
+    /// responder (os testes trocam).
     public init(armazenamento: ArmazenamentoDeCameras = ArmazenamentoDeCameras(),
                 argumentos: [String] = ProcessInfo.processInfo.arguments,
                 observarCicloDeVida: Bool = true,
@@ -90,7 +91,7 @@ public final class ModeloDoApp: ObservableObject {
             sessaoDaCamera = nil
             for c in cameras where sessoesGerais[c.id] == nil {
                 let s = SessaoDeVideo(camera: c, stream: .secundario)
-                s.aoRecusarCredenciais = { [weak self] in self?.renovarCredenciais(de: c) }
+                acompanhar(s)
                 s.iniciar()
                 sessoesGerais[c.id] = s
             }
@@ -233,23 +234,51 @@ public final class ModeloDoApp: ObservableObject {
 
     // MARK: - Senha ou endereço trocados
 
-    /// A câmera recusou o usuário e a senha guardados: o app do fabricante pode trocar a senha, e o
-    /// roteador, o endereço. Pega os atuais com a própria câmera, guarda e reabre só as sessões dela.
-    /// Se ela devolver o mesmo que já estava guardado, não reabre nada: insistir com uma senha
+    /// Por que os dados guardados de uma câmera deixaram de servir.
+    enum MotivoDaRenovacao: Equatable {
+        /// Ela recusou o usuário e a senha: o app do fabricante (iCSee, XMEye) pode ter trocado a senha.
+        case senhaRecusada
+        /// Ela não responde no endereço guardado: o roteador pode ter dado outro a ela, e o dela a
+        /// outro aparelho. O aviso se repete enquanto ela não voltar; só o primeiro vai para a tela.
+        case semResposta(primeiraVez: Bool)
+    }
+
+    /// Acompanha o vídeo de uma câmera: se ela recusar a senha ou parar de responder, renova os dados dela.
+    func acompanhar(_ sessao: SessaoDeVideo) {
+        let c = sessao.camera
+        sessao.aoRecusarCredenciais = { [weak self] in self?.renovarDados(de: c, porque: .senhaRecusada) }
+        sessao.aoNaoResponder = { [weak self] primeiraVez in
+            self?.renovarDados(de: c, porque: .semResposta(primeiraVez: primeiraVez))
+        }
+    }
+
+    /// O app do fabricante pode trocar a senha de uma câmera, e o roteador, o endereço: pega os atuais
+    /// com a própria câmera (ou procurando na rede pelo número de série), guarda e reabre só as sessões
+    /// dela. Se ela devolver o mesmo que já estava guardado, não reabre nada: insistir com uma senha
     /// recusada pode fazer a câmera bloquear a conta.
-    func renovarCredenciais(de camera: CameraConfig) {
+    func renovarDados(de camera: CameraConfig, porque motivo: MotivoDaRenovacao) {
         guard !renovando.contains(camera.id) else { return }
         renovando.insert(camera.id)
-        avisar("\(camera.nome) não aceitou a senha guardada: pegando a atual com a própria câmera…")
+        let senha = motivo == .senhaRecusada
+        // Quem segue sem responder já foi avisado: daí em diante só o que mudar aparece na tela.
+        let naTela = motivo != .semResposta(primeiraVez: false)
+        func informar(_ texto: String, _ tipo: Aviso.Tipo = .info) {
+            if naTela { avisar(texto, tipo) } else { Depuracao.registrar(texto) }
+        }
+        informar(senha ? "\(camera.nome) não aceitou a senha guardada: pegando a atual com a própria câmera…"
+                     : "\(camera.nome) não responde no endereço guardado: procurando na rede…")
         let reidentificar = self.reidentificar
         Task {
             let r = await Task.detached(priority: .userInitiated) { Result { try reidentificar(camera) } }.value
             renovando.remove(camera.id)
             switch r {
             case .failure(let erro):
-                avisar("\(camera.nome) não aceitou a senha guardada e não consegui pegar a atual: \(Redact.texto(String(describing: erro)))", .erro)
+                let porque = Redact.texto(String(describing: erro))
+                informar(senha ? "\(camera.nome) não aceitou a senha guardada e não consegui pegar a atual: \(porque)"
+                             : "\(camera.nome) não responde e não consegui achá-la: \(porque)", .erro)
             case .success(let nova) where nova.host == camera.host && nova.usuario == camera.usuario && nova.hash == camera.hash:
-                avisar("\(camera.nome) recusou a senha que ela mesma informa. Tente de novo daqui a alguns minutos.", .erro)
+                informar(senha ? "\(camera.nome) recusou a senha que ela mesma informa. Tente de novo daqui a alguns minutos."
+                             : "\(camera.nome) responde no endereço guardado, mas não manda imagem. Continuo tentando.", .erro)
             case .success(let nova):
                 do {
                     try armazenamento.atualizar(camera.id) {

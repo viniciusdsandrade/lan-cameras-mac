@@ -85,9 +85,12 @@ final class FluxoDeVideoTests: XCTestCase {
         // a primeira conexão morre no meio do vídeo (depois do primeiro quadro-chave); a segunda é completa
         let servidor = try ServidorRTSPFalso(sdp: try sdp(h265: false), pacotesDeVideo: pacotes, cortarPrimeiraConexaoApos: pacotes.count / 3)
         servidor.iniciar()
-        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo")
+        // avisaria já na primeira conexão sem imagem: a que cai depois de mostrar imagem não conta
+        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo", falhasAteAvisar: 1)
         let estados = Estados()
+        let naoRespondeu = Contador()
         fluxo.aoMudarEstado = { estados.registrar($0) }
+        fluxo.aoNaoResponder = { _ in naoRespondeu.incrementar() }
         fluxo.iniciar()
         defer { fluxo.parar() }
 
@@ -101,6 +104,7 @@ final class FluxoDeVideoTests: XCTestCase {
         let primeiroErro = try XCTUnwrap(sequencia.firstIndex(of: "erro"))
         XCTAssertTrue(sequencia[primeiroErro...].contains("conectando"), "depois do erro deveria tentar de novo: \(sequencia)")
         XCTAssertTrue(sequencia[primeiroErro...].contains("aoVivo"), "e voltar a mostrar imagem: \(sequencia)")
+        XCTAssertEqual(naoRespondeu.valor, 0, "a conexão caiu depois de mostrar imagem: a câmera está no endereço")
     }
 
     func testCameraQuePassaAMudaSemFecharAConexaoEhDetectadaEReconecta() throws {
@@ -116,14 +120,47 @@ final class FluxoDeVideoTests: XCTestCase {
                       "conexões: \(servidor.conexoes), quadros: \(fluxo.quadrosRecebidos)")
     }
 
+    // MARK: - Câmera que não responde no endereço guardado
+
+    func testOutroAparelhoNoEnderecoDaCameraAvisaQueElaNaoResponde() throws {
+        // o roteador deu o endereço da câmera a um aparelho que responde 405 ao OPTIONS e fecha a
+        // conexão: sem o aviso, a tela ficava em "sem imagem: conexão fechada" para sempre
+        let aparelho = try AparelhoQueNaoEhACamera()
+        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:\(aparelho.porta)/fluxo", falhasAteAvisar: 2)
+        let avisos = Lista<Bool>()
+        fluxo.aoNaoResponder = { avisos.registrar($0) }
+        fluxo.iniciar()
+        defer { fluxo.parar() }
+
+        XCTAssertTrue(esperar(ate: 6) { !avisos.itens.isEmpty }, "deveria avisar que a câmera não responde")
+        XCTAssertEqual(avisos.itens, [true])
+        XCTAssertEqual(aparelho.conexoes, 2, "avisa depois de duas conexões seguidas sem imagem")
+        XCTAssertEqual(fluxo.estado, .erro("conexão fechada"))
+    }
+
+    func testEnderecoQueRecusaAConexaoAvisaDeNovoEnquantoACameraNaoVolta() throws {
+        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:1/fluxo", falhasAteAvisar: 1, falhasEntreAvisos: 1)  // porta 1: recusa
+        let avisos = Lista<Bool>()
+        fluxo.aoNaoResponder = { avisos.registrar($0) }
+        fluxo.iniciar()
+        defer { fluxo.parar() }
+
+        XCTAssertTrue(esperar(ate: 5) { avisos.itens.count >= 2 }, "avisos: \(avisos.itens)")
+        XCTAssertEqual(Array(avisos.itens.prefix(2)), [true, false], "só o primeiro aviso é a primeira vez")
+        guard case .erro(let mensagem) = fluxo.estado else { return XCTFail("estado inesperado: \(fluxo.estado)") }
+        XCTAssertTrue(mensagem.hasPrefix("não consegui conectar"), mensagem)
+    }
+
     // MARK: - Senha recusada
 
     func testCameraQueRecusaASenhaAvisaUmaVezENaoInsiste() throws {
         let servidor = try ServidorRTSPFalso(sdp: try sdp(h265: false), pacotesDeVideo: [], statusDoDescribe: 401)
         servidor.iniciar()
-        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo")
+        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo", falhasAteAvisar: 1)
         let recusas = Contador()
+        let naoRespondeu = Contador()
         fluxo.aoRecusarCredenciais = { recusas.incrementar() }
+        fluxo.aoNaoResponder = { _ in naoRespondeu.incrementar() }
         fluxo.iniciar()
         defer { fluxo.parar() }
 
@@ -133,6 +170,7 @@ final class FluxoDeVideoTests: XCTestCase {
         Thread.sleep(forTimeInterval: 3)                       // sem a recusa, tentaria de novo em 2 s
         XCTAssertEqual(servidor.conexoes, 1, "com a mesma senha não deveria tentar de novo")
         XCTAssertEqual(recusas.valor, 1)
+        XCTAssertEqual(naoRespondeu.valor, 0, "ela respondeu: só recusou a senha")
 
         fluxo.parar()
         XCTAssertTrue(esperar(ate: 3) { fluxo.estado == .parado }, "parar() deveria soltar o fluxo parado no erro")
@@ -154,6 +192,14 @@ final class FluxoDeVideoTests: XCTestCase {
         XCTAssertNil(RTSPClient(url: "http://127.0.0.1/x"))
         XCTAssertNil(RTSPClient(url: "isso nao e url"))
     }
+}
+
+/// O que chega de outras threads, na ordem.
+final class Lista<T>: @unchecked Sendable {
+    private let trava = NSLock()
+    private var _itens: [T] = []
+    func registrar(_ v: T) { trava.withLock { _itens.append(v) } }
+    var itens: [T] { trava.withLock { _itens } }
 }
 
 final class Estados: @unchecked Sendable {

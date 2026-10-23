@@ -197,6 +197,83 @@ final class ModeloDoAppTests: XCTestCase {
         m.pausar()
     }
 
+    func testCameraQueNaoRespondeEApareceEmOutroEnderecoReabreSoEla() async throws {
+        // o roteador deu outro endereço à câmera, e o dela a outro aparelho
+        let m = modelo(reidentificar: { c in
+            var nova = c
+            nova.host = "192.0.2.40"
+            return nova
+        })
+        let antes = m.sessoesGerais
+        let primeira = try XCTUnwrap(antes["SERIE-FALSA-1"])
+        primeira.aoNaoResponder?(true)                       // o que o fluxo faz depois de algumas conexões sem imagem
+        XCTAssertEqual(m.aviso?.texto, "Câmera 1 não responde no endereço guardado: procurando na rede…")
+        let achou = await esperar { m.camera(id: "SERIE-FALSA-1")?.host == "192.0.2.40" }
+        XCTAssertTrue(achou)
+        XCTAssertEqual(try ArmazenamentoDeCameras(pasta: pasta).carregar().map(\.host), ["192.0.2.40", "127.0.0.1", "127.0.0.1"],
+                       "o endereço novo fica guardado")
+        let reaberta = try XCTUnwrap(m.sessoesGerais["SERIE-FALSA-1"])
+        XCTAssertFalse(reaberta === primeira, "a sessão da câmera é reaberta no endereço novo")
+        XCTAssertEqual(reaberta.camera.host, "192.0.2.40")
+        XCTAssertTrue(m.sessoesGerais["SERIE-FALSA-2"] === antes["SERIE-FALSA-2"], "as outras câmeras seguem como estavam")
+        XCTAssertTrue(m.sessoesGerais["SERIE-FALSA-3"] === antes["SERIE-FALSA-3"])
+        XCTAssertEqual(m.aviso?.texto, "Câmera 1 tinha mudado de endereço na rede: já atualizei.")
+        m.pausar()
+    }
+
+    func testNaTelaDaCameraACameraQueNaoRespondeTambemEhProcurada() async throws {
+        let m = modelo(reidentificar: { c in
+            var nova = c
+            nova.host = "192.0.2.50"
+            return nova
+        })
+        m.selecionar(.camera("SERIE-FALSA-3"))
+        let antiga = try XCTUnwrap(m.sessaoDaCamera)
+        antiga.video.aoNaoResponder?(false)                  // uma busca de antes não achou; esta acha
+        XCTAssertNil(m.aviso, "as buscas que se repetem não aparecem na tela")
+        let reabriu = await esperar { m.sessaoDaCamera != nil && m.sessaoDaCamera !== antiga }
+        XCTAssertTrue(reabriu)
+        XCTAssertEqual(m.sessaoDaCamera?.camera.host, "192.0.2.50")
+        XCTAssertEqual(m.selecao, .camera("SERIE-FALSA-3"), "continua na mesma tela")
+        XCTAssertEqual(m.aviso?.texto, "Câmera 3 tinha mudado de endereço na rede: já atualizei.", "o que achou sempre aparece")
+        m.pausar()
+    }
+
+    func testCameraQueNaoRespondeMasEstaNoMesmoEnderecoNaoReabreNada() async throws {
+        let m = modelo(reidentificar: { $0 })                  // ela está lá, com a mesma senha
+        let antiga = try XCTUnwrap(m.sessoesGerais["SERIE-FALSA-2"])
+        antiga.aoNaoResponder?(true)
+        let avisou = await esperar { m.aviso?.tipo == .erro }
+        XCTAssertTrue(avisou)
+        XCTAssertEqual(m.aviso?.texto, "Câmera 2 responde no endereço guardado, mas não manda imagem. Continuo tentando.")
+        XCTAssertTrue(m.sessoesGerais["SERIE-FALSA-2"] === antiga, "o fluxo dela segue tentando sozinho")
+        m.pausar()
+    }
+
+    func testCameraSumidaSoAvisaNaPrimeiraVezMasSegueProcurando() async throws {
+        let chamadas = Contagem()
+        let m = modelo(reidentificar: { _ in
+            chamadas.somar()
+            throw Cadastro.Falha.cameraSumiu
+        })
+        let s = try XCTUnwrap(m.sessoesGerais["SERIE-FALSA-1"])
+        s.aoNaoResponder?(true)
+        let avisou = await esperar { m.aviso?.tipo == .erro }
+        XCTAssertTrue(avisou)
+        XCTAssertEqual(m.aviso?.texto, "Câmera 1 não responde e não consegui achá-la: "
+                       + "ela não está mais no endereço guardado e não apareceu na rede")
+
+        m.aviso = nil
+        s.aoNaoResponder?(false)                               // o fluxo avisa de novo enquanto ela não volta
+        let procurouDeNovo = await esperar { chamadas.valor == 2 }
+        XCTAssertTrue(procurouDeNovo)
+        try await Task.sleep(for: .milliseconds(200))           // a resposta volta para a thread principal
+        XCTAssertNil(m.aviso, "quem segue sumida não enche a tela de avisos")
+        XCTAssertEqual(try ArmazenamentoDeCameras(pasta: pasta).carregar().map(\.host), ["127.0.0.1", "127.0.0.1", "127.0.0.1"])
+        XCTAssertTrue(m.sessoesGerais["SERIE-FALSA-1"] === s)
+        m.pausar()
+    }
+
     func testZoomFicaNosLimitesEAmpliaEmVoltaDoPonto() {
         let z = EstadoDeZoom()
         z.definir(9)

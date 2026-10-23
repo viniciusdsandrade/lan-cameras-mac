@@ -31,9 +31,9 @@ public enum Cadastro {
     /// Pega de novo, da própria câmera, o endereço e as credenciais de uma câmera já guardada: o app
     /// do fabricante (iCSee, XMEye) pode trocar a senha dela, e o roteador, o endereço. Pergunta
     /// primeiro no endereço guardado; se lá não estiver a mesma câmera (o número de série não muda),
-    /// procura na rede. Nome, ordem e lentes ficam como estavam.
+    /// procura na rede por esse número (`procurar` recebe o número). Nome, ordem e lentes ficam como estavam.
     public static func reidentificar(_ camera: CameraConfig, porta: UInt16 = 8899,
-                                     procurar: () throws -> Resultado = { try Cadastro.procurarNaRede() }) throws -> CameraConfig {
+                                     procurar: (_ serie: String) throws -> Resultado = { try Cadastro.procurarNaRede(serie: $0) }) throws -> CameraConfig {
         var nova = camera
         let cliente = ONVIFClient(host: camera.host, porta: porta)
         if let info = try? cliente.informacoes(), info.serie == camera.id {
@@ -42,7 +42,7 @@ public enum Cadastro {
             nova.hash = cred.hash
             return nova
         }
-        guard let achada = try procurar().cameras.first(where: { $0.id == camera.id }) else { throw Falha.cameraSumiu }
+        guard let achada = try procurar(camera.id).cameras.first(where: { $0.id == camera.id }) else { throw Falha.cameraSumiu }
         nova.host = achada.host
         nova.usuario = achada.usuario
         nova.hash = achada.hash
@@ -66,10 +66,11 @@ public enum Cadastro {
     }
 
     /// O jeito de procurar de cada aparelho: no Mac, WS-Discovery e, se nada responder, a varredura;
-    /// no iOS, só a varredura (o multicast exige uma autorização da Apple).
-    public static func procurarNaRede(duracao: TimeInterval = 4) throws -> Resultado {
+    /// no iOS, só a varredura (o multicast exige uma autorização da Apple). Com `serie`, a varredura
+    /// também roda se essa câmera não estiver entre as que responderam (o UDP do WS-Discovery se perde).
+    public static func procurarNaRede(duracao: TimeInterval = 4, serie: String? = nil) throws -> Resultado {
         #if os(macOS)
-        if let r = try? procurar(duracao: duracao), !r.cameras.isEmpty { return r }
+        if let r = try? procurar(duracao: duracao), r.cameras.contains(where: { serie == nil || $0.id == serie }) { return r }
         #endif
         return try procurarPorVarredura()
     }

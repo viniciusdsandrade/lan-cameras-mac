@@ -3,6 +3,7 @@ import Foundation
 /// Vídeo ao vivo de um fluxo RTSP de uma câmera: conecta, decodifica e, se a
 /// conexão cair, tenta de novo com espera crescente (1, 2, 4, 8 e 10 s). Se a câmera
 /// recusar o usuário e a senha, não tenta de novo: avisa por `aoRecusarCredenciais`.
+/// Se várias conexões seguidas terminarem sem imagem, avisa por `aoNaoResponder` e segue tentando.
 ///
 /// Cada instância ocupa UMA sessão RTSP na câmera (elas aguentam poucas);
 /// `parar()` libera a sessão. Os ouvintes são chamados de threads internas.
@@ -36,6 +37,8 @@ public final class FluxoDeVideo: @unchecked Sendable {
     private let url: String
     private let incluirAudio: Bool
     private let limiteSemVideo: TimeInterval
+    private let falhasAteAvisar: Int
+    private let falhasEntreAvisos: Int
 
     private let trava = NSLock()
     private var rodando = false
@@ -49,12 +52,18 @@ public final class FluxoDeVideo: @unchecked Sendable {
     private let _aoMudarEstado = Caixa<(@Sendable (Estado) -> Void)?>(nil)
     private let _aoReceberAudio = Caixa<(@Sendable (RTPPacket) -> Void)?>(nil)
     private let _aoRecusarCredenciais = Caixa<(@Sendable () -> Void)?>(nil)
+    private let _aoNaoResponder = Caixa<(@Sendable (Bool) -> Void)?>(nil)
 
     /// `limiteSemVideo`: segundos sem nenhum quadro de vídeo que contam como câmera travada (reconecta).
-    public init(url: String, incluirAudio: Bool = false, limiteSemVideo: TimeInterval = 8) {
+    /// `falhasAteAvisar` e `falhasEntreAvisos`: quantas conexões seguidas sem imagem até `aoNaoResponder`
+    /// e de quantas em quantas ele se repete enquanto durar (a 10 s por tentativa, uns 5 min).
+    public init(url: String, incluirAudio: Bool = false, limiteSemVideo: TimeInterval = 8,
+                falhasAteAvisar: Int = 3, falhasEntreAvisos: Int = 30) {
         self.url = url
         self.incluirAudio = incluirAudio
         self.limiteSemVideo = limiteSemVideo
+        self.falhasAteAvisar = max(1, falhasAteAvisar)
+        self.falhasEntreAvisos = max(1, falhasEntreAvisos)
     }
 
     public var estado: Estado { _estado.valor }
@@ -77,6 +86,13 @@ public final class FluxoDeVideo: @unchecked Sendable {
     public var aoRecusarCredenciais: (@Sendable () -> Void)? {
         get { _aoRecusarCredenciais.valor }
         set { _aoRecusarCredenciais.valor = newValue }
+    }
+    /// Conexões seguidas terminaram sem imagem (recusadas, fechadas, sem resposta): o roteador pode ter
+    /// dado outro endereço à câmera, e o dela a outro aparelho. Chega uma vez com `primeiraVez` e se
+    /// repete, com `false`, a cada `falhasEntreAvisos` falhas enquanto não chegar imagem. O fluxo segue tentando.
+    public var aoNaoResponder: (@Sendable (_ primeiraVez: Bool) -> Void)? {
+        get { _aoNaoResponder.valor }
+        set { _aoNaoResponder.valor = newValue }
     }
 
     public func iniciar() {
@@ -113,6 +129,7 @@ public final class FluxoDeVideo: @unchecked Sendable {
 
     private func laco() {
         var espera = 1.0
+        var falhas = 0                                     // conexões seguidas sem imagem
         while estaRodando() {
             mudar(.conectando)
             let desfecho = executarUmaSessao()
@@ -124,7 +141,16 @@ public final class FluxoDeVideo: @unchecked Sendable {
                 while estaRodando() { _ = acordar.wait(timeout: .now() + 60) }
                 break
             }
-            espera = desfecho == .comQuadros ? 1 : min(espera * 2, 10)
+            if desfecho == .comQuadros {
+                espera = 1
+                falhas = 0
+            } else {
+                espera = min(espera * 2, 10)
+                falhas += 1
+                if falhas >= falhasAteAvisar, (falhas - falhasAteAvisar) % falhasEntreAvisos == 0 {
+                    _aoNaoResponder.valor?(falhas == falhasAteAvisar)
+                }
+            }
             _ = acordar.wait(timeout: .now() + espera)
         }
         mudar(.parado)

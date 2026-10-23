@@ -117,6 +117,59 @@ final class ServidorHTTPFalso: @unchecked Sendable {
     }
 }
 
+/// Outro aparelho no endereço que era da câmera (o roteador o deu a ele): tem RTSP, mas responde
+/// 405 ao OPTIONS e fecha a conexão no pedido seguinte, sem nunca mandar vídeo.
+final class AparelhoQueNaoEhACamera: @unchecked Sendable {
+    let porta: UInt16
+    private let escuta: Int32
+    private let trava = NSLock()
+    private var _conexoes = 0
+
+    init() throws {
+        let (s, p) = try abrirEscutaLocal()
+        escuta = s
+        porta = p
+        let t = Thread { [self] in servir() }
+        t.name = "aparelho-falso"
+        t.start()
+    }
+
+    deinit { close(escuta) }
+
+    var conexoes: Int { trava.withLock { _conexoes } }
+
+    private func servir() {
+        while true {
+            let c = accept(escuta, nil, nil)
+            if c < 0 { return }
+            trava.withLock { _conexoes += 1 }
+            atender(c)
+            close(c)
+        }
+    }
+
+    private func atender(_ c: Int32) {
+        var buf = [UInt8]()
+        let fim: [UInt8] = [13, 10, 13, 10]
+        while true {
+            if buf.count >= 4, let i = (0...(buf.count - 4)).first(where: { Array(buf[$0..<($0 + 4)]) == fim }) {
+                let pedido = String(decoding: buf[0..<i], as: UTF8.self)
+                buf.removeFirst(i + 4)
+                guard pedido.hasPrefix("OPTIONS") else { return }          // DESCRIBE e o resto: fecha
+                let cseq = pedido.components(separatedBy: "\r\n")
+                    .first { $0.lowercased().hasPrefix("cseq:") }
+                    .map { $0.dropFirst(5).trimmingCharacters(in: .whitespaces) } ?? "0"
+                enviarTudo(c, Array("RTSP/1.0 405 Method Not Allowed\r\nCSeq: \(cseq)\r\n\r\n".utf8))
+                continue
+            }
+            var tmp = [UInt8](repeating: 0, count: 4096)
+            let n = tmp.withUnsafeMutableBytes { recv(c, $0.baseAddress, 4096, 0) }
+            if n <= 0 { return }
+            buf.append(contentsOf: tmp[0..<n])
+        }
+    }
+}
+
 /// Servidor DVRIP em 127.0.0.1 (uma conexão): responde o JSON de cada pedido e guarda tudo.
 final class ServidorDVRIPFalso: @unchecked Sendable {
     struct Quadro { let id: Int; let sessao: UInt32; let corpo: [UInt8]; let instante: TimeInterval }
