@@ -3,6 +3,10 @@ import Darwin
 
 /// Servidor RTSP mínimo em 127.0.0.1 que imita as câmeras XiongMai, inclusive o
 /// defeito que mais atrapalha: manda quadros de áudio ANTES da resposta ao PLAY.
+///
+/// Não tem como fechar, de propósito: fechar a escuta enquanto a thread dele ainda atende uma
+/// conexão deixa o número do descritor livre, o próximo servidor do teste o reaproveita, e a thread
+/// velha, ao voltar ao `accept`, rouba as conexões do novo (e responde com o status antigo).
 final class ServidorRTSPFalso: @unchecked Sendable {
     struct Falha: Error { let motivo: String }
 
@@ -61,8 +65,6 @@ final class ServidorRTSPFalso: @unchecked Sendable {
         t.name = "rtsp-falso"
         t.start()
     }
-
-    func encerrar() { close(escuta) }
 
     // MARK: -
 

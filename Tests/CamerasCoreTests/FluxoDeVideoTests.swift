@@ -178,9 +178,9 @@ final class FluxoDeVideoTests: XCTestCase {
 
     func testSo401E403ContamComoSenhaRecusada() throws {
         for (status, recusada) in [(401, true), (403, true), (404, false), (503, false)] {
+            // cada servidor fica aberto até o fim: veja ServidorRTSPFalso
             let servidor = try ServidorRTSPFalso(sdp: try sdp(h265: false), pacotesDeVideo: [], statusDoDescribe: status)
             servidor.iniciar()
-            defer { servidor.encerrar() }
             let cliente = try XCTUnwrap(RTSPClient(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo"))
             XCTAssertThrowsError(try cliente.executar(incluirAudio: false, aoFicarPronto: { _ in }, aoReceberVideo: { _ in })) { erro in
                 XCTAssertEqual((erro as? RTSPErro)?.credenciaisRecusadas, recusada, "\(status): \(erro)")
