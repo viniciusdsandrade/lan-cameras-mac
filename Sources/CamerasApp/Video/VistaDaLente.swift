@@ -17,6 +17,7 @@ struct VistaDaLente: NSViewRepresentable {
     }
 
     func updateNSView(_ v: LenteNSView, context: Context) {
+        v.conectar(a: distribuidor)
         v.lente = lente
         v.zoomHabilitado = zoomHabilitado
         v.aplicarZoom()
@@ -32,7 +33,7 @@ struct VistaDaLente: NSViewRepresentable {
 final class LenteNSView: NSView {
     private let exibidor = ExibidorDeVideo()
     private let camadaDeZoom = CALayer()
-    private let distribuidor: DistribuidorDeQuadros
+    private var distribuidor: DistribuidorDeQuadros?
     private let zoom: EstadoDeZoom
     private var registro: UUID?
     private var ultimoPonto: CGPoint?
@@ -42,7 +43,6 @@ final class LenteNSView: NSView {
 
     @MainActor
     init(distribuidor: DistribuidorDeQuadros, zoom: EstadoDeZoom) {
-        self.distribuidor = distribuidor
         self.zoom = zoom
         super.init(frame: .zero)
         wantsLayer = true
@@ -51,15 +51,26 @@ final class LenteNSView: NSView {
         layer?.backgroundColor = NSColor.black.cgColor
         layer?.addSublayer(camadaDeZoom)
         camadaDeZoom.addSublayer(exibidor.camada)
-        let exibidor = self.exibidor
-        registro = distribuidor.adicionar { exibidor.exibir($0) }
+        conectar(a: distribuidor)
     }
 
     required init?(coder: NSCoder) { fatalError("não usado") }
 
+    /// Passa a mostrar os quadros de `novo`. O modelo troca a sessão de vídeo de uma câmera (endereço
+    /// ou senha novos) sem a tela sair do lugar: presa ao distribuidor antigo, a lente congelaria no
+    /// último quadro dele, ou ficaria preta.
+    func conectar(a novo: DistribuidorDeQuadros) {
+        guard novo !== distribuidor else { return }
+        desconectar()
+        distribuidor = novo
+        let exibidor = self.exibidor
+        registro = novo.adicionar { exibidor.exibir($0) }
+    }
+
     func desconectar() {
-        if let r = registro { distribuidor.remover(r) }
+        if let r = registro { distribuidor?.remover(r) }
         registro = nil
+        distribuidor = nil
         exibidor.limpar()
     }
 
