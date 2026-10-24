@@ -18,12 +18,13 @@ do fabricante.
 - Ouvir a câmera, falar por ela ao vivo, tocar sons prontos e texto falado.
 - Foto da lente atual.
 - Gravações do cartão: as câmeras gravam sozinhas no cartão de memória quando há movimento, com
-  o som, mesmo com o Mac e o celular desligados (é o que o app do fabricante configura nelas). O
-  app mostra o que cada uma gravou em cada noite, o espaço do cartão e se ela está gravando, e
-  converte cada gravação em MP4 para assistir ou guardar.
-- Gravação pelo Mac (opcional): uma cópia de cada movimento, com o som, gravada pelo Mac enquanto
-  ele estiver ligado, começando uns segundos antes e seguindo enquanto o movimento durar. Por
-  padrão só à noite (das 18 h às 6 h); segue com a janela fechada e a tela apagada.
+  o som, mesmo com o Mac e o celular desligados (é o que o app do fabricante configura nelas). Em
+  Gravações, cada noite aparece numa linha do tempo e numa galeria com a foto do instante de cada
+  movimento (a câmera tira uma); o vídeo baixa do cartão e toca no próprio app, e dá para
+  guardá-lo como MP4. Também mostra o espaço do cartão e se a câmera está gravando.
+- Gravação no Mac (opcional, em Ajustes): uma cópia de cada movimento, com o som, gravada pelo Mac
+  enquanto ele estiver ligado, começando uns segundos antes e seguindo enquanto o movimento durar.
+  Por padrão só à noite (das 18 h às 6 h); segue com a janela fechada e a tela apagada.
 - Senha ou endereço trocados: se o app do fabricante (iCSee, XMEye) trocar a senha de uma
   câmera, ou o roteador mudar o endereço dela, o app percebe quando ela recusa a senha guardada
   ou para de responder no endereço guardado (que pode ter ficado vazio ou com outro aparelho),
@@ -43,7 +44,9 @@ do fabricante.
 | + e − | zoom digital; 0 volta ao normal |
 | M | liga e desliga o som da câmera |
 | ⇧⌘P | foto da lente atual |
-| ⇧⌘R | gravações (do cartão das câmeras e do Mac) |
+| ⇧⌘R | gravações do cartão das câmeras |
+| ← → e espaço | nas gravações: movimento anterior e seguinte, tocar e pausar |
+| ⌘, | ajustes (gravação no Mac) |
 
 Na imagem, rolar ou pinçar no trackpad aproxima no ponto do cursor, arrastar move a
 imagem aproximada e o duplo clique volta ao normal.
