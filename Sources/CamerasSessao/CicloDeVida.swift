@@ -25,7 +25,10 @@ extension ModeloDoApp {
         quando(ws, NSWorkspace.screensDidSleepNotification) { m, _ in m.pausar() }
         quando(ws, NSWorkspace.didWakeNotification) { m, _ in m.retomarDepois(segundos: 3) }       // dá tempo ao Wi-Fi de voltar
         quando(ws, NSWorkspace.screensDidWakeNotification) { m, _ in m.retomarDepois(segundos: 1) }
-        quando(nc, NSApplication.willTerminateNotification) { m, _ in m.sessaoDaCamera?.encerrar() }
+        quando(nc, NSApplication.willTerminateNotification) { m, _ in
+            m.sessaoDaCamera?.encerrar()
+            m.gravacao.encerrar()
+        }
         // Janela minimizada não pode ser "principal" e o aviso de oclusão dela seria descartado
         // abaixo: por isso minimizar e ocultar têm observadores próprios.
         quando(nc, NSWindow.didMiniaturizeNotification) { m, _ in
@@ -58,7 +61,10 @@ extension ModeloDoApp {
         // Central de Controle, ligação, aviso por cima: o vídeo segue, mas sem ninguém segurando
         // os botões não pode haver movimento nem fala.
         quando(nc, UIApplication.willResignActiveNotification) { m, _ in m.sessaoDaCamera?.soltarControles() }
-        quando(nc, UIApplication.willTerminateNotification) { m, _ in m.sessaoDaCamera?.encerrar() }
+        quando(nc, UIApplication.willTerminateNotification) { m, _ in
+            m.sessaoDaCamera?.encerrar()
+            m.gravacao.encerrar()
+        }
         quando(nc, AVAudioSession.interruptionNotification) { m, n in
             let tipo = (n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init)
             if tipo == .began {

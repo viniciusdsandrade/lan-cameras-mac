@@ -2,7 +2,7 @@ import SwiftUI
 import CamerasCore
 
 /// O estado do app inteiro: câmeras guardadas, o que está na tela, as sessões abertas nas câmeras,
-/// avisos e preferências. É o mesmo no Mac e no iPhone; o que muda (janela, segundo plano) fica
+/// a gravação por movimento, avisos e preferências. É o mesmo no Mac e no iPhone; o que muda (janela, segundo plano) fica
 /// em `CicloDeVida.swift`.
 @MainActor
 public final class ModeloDoApp: ObservableObject {
@@ -27,6 +27,8 @@ public final class ModeloDoApp: ObservableObject {
     @AppStorage("volume") public var volume = 30.0
 
     public let armazenamento: ArmazenamentoDeCameras
+    /// Gravação por movimento: segue com a janela escondida, ao contrário das sessões da tela.
+    public let gravacao: GravacaoPorMovimento
     /// Sessões soltas porque ninguém está vendo (janela escondida, app em segundo plano, aparelho dormindo).
     private(set) var pausado = false
     var observadores: [NSObjectProtocol] = []
@@ -38,14 +40,19 @@ public final class ModeloDoApp: ObservableObject {
 
     /// `argumentos`: `--abrir NOME`, `--qualidade leve|hd`, `--zoom N` abrem direto num estado (útil em testes).
     /// `reidentificar`: como pegar de novo os dados de uma câmera que recusou a senha ou parou de
-    /// responder (os testes trocam).
+    /// responder (os testes trocam). `pastaDeGravacoes` e `agora`: onde a gravação por movimento
+    /// guarda os arquivos e que horas são para ela (os testes trocam).
     public init(armazenamento: ArmazenamentoDeCameras = ArmazenamentoDeCameras(),
                 argumentos: [String] = ProcessInfo.processInfo.arguments,
                 observarCicloDeVida: Bool = true,
-                reidentificar: @escaping @Sendable (CameraConfig) throws -> CameraConfig = { try Cadastro.reidentificar($0) }) {
+                reidentificar: @escaping @Sendable (CameraConfig) throws -> CameraConfig = { try Cadastro.reidentificar($0) },
+                pastaDeGravacoes: URL = Plataforma.pastaDeGravacoes,
+                agora: @escaping () -> Date = Date.init) {
         self.armazenamento = armazenamento
         self.argumentos = argumentos
         self.reidentificar = reidentificar
+        gravacao = GravacaoPorMovimento(armazenamento: armazenamento, pasta: pastaDeGravacoes, agora: agora)
+        gravacao.modelo = self
         recarregarCameras()
         aplicarArgumentos()
         ajustarSessoes()
@@ -56,6 +63,7 @@ public final class ModeloDoApp: ObservableObject {
 
     public func recarregarCameras() {
         cameras = (try? armazenamento.carregar()) ?? []
+        gravacao.atualizar(cameras: cameras)
     }
 
     public func camera(id: String) -> CameraConfig? { cameras.first { $0.id == id } }

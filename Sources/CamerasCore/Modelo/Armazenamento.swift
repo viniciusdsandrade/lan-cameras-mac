@@ -1,6 +1,7 @@
 import Foundation
 
-/// Guarda as câmeras (com o hash da senha) e as posições salvas pelo app.
+/// Guarda as câmeras (com o hash da senha), as posições salvas pelo app e os ajustes da gravação
+/// por movimento.
 ///
 /// Tudo fica em `~/Library/Application Support/Câmeras de Casa/`, pasta 0700 e
 /// arquivos 0600, longe de qualquer repositório e fora do Keychain: com assinatura
@@ -102,6 +103,22 @@ public final class ArmazenamentoDeCameras: @unchecked Sendable {
     private func lerPresets() -> [String: [String]] {
         guard let d = try? Data(contentsOf: arquivoDePresets) else { return [:] }
         return (try? JSONDecoder().decode([String: [String]].self, from: d)) ?? [:]
+    }
+
+    // MARK: - Ajustes da gravação por movimento (sem segredos)
+
+    private var arquivoDeGravacao: URL { pasta.appendingPathComponent("gravacao.json") }
+
+    /// nil se ainda não foram guardados (ou não dá para ler o que foi).
+    public func ajustesDeGravacao<T: Decodable>(_ tipo: T.Type) -> T? {
+        trava.withLock {
+            guard let d = try? Data(contentsOf: arquivoDeGravacao) else { return nil }
+            return try? JSONDecoder().decode(T.self, from: d)
+        }
+    }
+
+    public func salvarAjustesDeGravacao<T: Encodable>(_ ajustes: T) throws {
+        try trava.withLock { try gravar(ajustes, em: arquivoDeGravacao) }
     }
 
     // MARK: - Gravação segura

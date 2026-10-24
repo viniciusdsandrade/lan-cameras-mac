@@ -4,8 +4,8 @@ import Photos
 import UIKit
 #endif
 
-/// O pouco que muda entre o Mac e o iPhone fora das telas: onde a foto vai parar e como o
-/// aparelho é chamado nas mensagens.
+/// O pouco que muda entre o Mac e o iPhone fora das telas: onde a foto e as gravações vão parar e
+/// como o aparelho é chamado nas mensagens.
 public enum Plataforma {
     public struct FotoGuardada: Sendable {
         /// O arquivo, quando a foto vira um arquivo (no Mac); no iPhone ela vai para o app Fotos.
@@ -60,6 +60,30 @@ public enum Plataforma {
         let destino = pasta.appendingPathComponent(nome)
         try dados.write(to: destino)
         return FotoGuardada(arquivo: destino, onde: "Imagens > Câmeras de Casa")
+        #endif
+    }
+
+    /// Onde ficam as gravações por movimento: no Mac, em Filmes > Câmeras de Casa; no iPhone, nos
+    /// documentos do app. `CAMERAS_GRAVACOES` troca a pasta (para testar sem mexer na de verdade).
+    public static var pastaDeGravacoes: URL {
+        if let p = ProcessInfo.processInfo.environment["CAMERAS_GRAVACOES"], !p.isEmpty {
+            return URL(fileURLWithPath: p, isDirectory: true)
+        }
+        #if os(iOS)
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Gravações", isDirectory: true)
+        #else
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Movies/Câmeras de Casa", isDirectory: true)
+        #endif
+    }
+
+    /// "Filmes > Câmeras de Casa": nas mensagens.
+    public static var ondeFicamAsGravacoes: String {
+        #if os(iOS)
+        return "Arquivos > Câmeras de Casa > Gravações"
+        #else
+        return "Filmes > Câmeras de Casa"
         #endif
     }
 

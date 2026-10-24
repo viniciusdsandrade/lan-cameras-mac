@@ -25,7 +25,7 @@ final class ModeloDoAppTests: XCTestCase {
     private func modelo(_ argumentos: [String] = [],
                         reidentificar: @escaping @Sendable (CameraConfig) throws -> CameraConfig = { _ in throw Cadastro.Falha.cameraSumiu }) -> ModeloDoApp {
         ModeloDoApp(armazenamento: ArmazenamentoDeCameras(pasta: pasta), argumentos: argumentos, observarCicloDeVida: false,
-                    reidentificar: reidentificar)
+                    reidentificar: reidentificar, pastaDeGravacoes: pasta.appendingPathComponent("gravacoes"))
     }
 
     /// Espera o que o modelo faz em segundo plano (as tarefas dele voltam para a thread principal).
