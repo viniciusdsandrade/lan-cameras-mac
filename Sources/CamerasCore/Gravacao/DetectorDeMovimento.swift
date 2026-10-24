@@ -120,9 +120,14 @@ public final class DetectorDeMovimento: AnalisadorDeMovimento, @unchecked Sendab
 
     /// O que a última análise viu (para depurar e para os testes).
     public struct Leitura: Sendable, Equatable {
-        public var celulasQueMudaram = 0
+        /// Tempo do quadro analisado.
+        public var tempo = 0.0
+        public var colunas = 0
+        /// Índices (linha × colunas + coluna) das células que mudaram.
+        public var celulas: [Int] = []
         public var maiorGrupo = 0
         public var movimento = false
+        public var celulasQueMudaram: Int { celulas.count }
     }
 
     private let limiares: Limiares
@@ -209,7 +214,8 @@ public final class DetectorDeMovimento: AnalisadorDeMovimento, @unchecked Sendab
             // vento deixam de contar depois de alguns minutos, em vez de gravar a noite inteira.
             let movimentoRecente = ultimoMovimento.map { tempo - $0 < 10 } ?? false
             let taxa: Float = aquecendo ? 0.2 : (movimentoRecente ? 0.0005 : 0.02)
-            let leitura = comparar(grade, com: referencia.grade, anterior: anterior.grade, taxa: taxa)
+            var leitura = comparar(grade, com: referencia.grade, anterior: anterior.grade, taxa: taxa)
+            leitura.tempo = tempo
             let bruto = !aquecendo && leitura.maiorGrupo >= limiares.grupo
             seguidas = bruto ? seguidas + 1 : 0
             _ultimaLeitura = leitura
@@ -232,17 +238,17 @@ public final class DetectorDeMovimento: AnalisadorDeMovimento, @unchecked Sendab
         let medianaDaAnterior = Self.mediana(desdeAAnterior)
 
         var mudou = [Bool](repeating: false, count: n)
-        var quantas = 0
+        var celulas: [Int] = []
         for i in 0..<n {
             let d = abs(desdeARef[i] - medianaDaRef)
             let limiar = max(limiares.minimo, limiares.vezesORuido * ruido[i])
             ruido[i] += taxa * (d - ruido[i])
             if d > limiar, abs(desdeAAnterior[i] - medianaDaAnterior) > limiar / 2 {
                 mudou[i] = true
-                quantas += 1
+                celulas.append(i)
             }
         }
-        return Leitura(celulasQueMudaram: quantas, maiorGrupo: Self.maiorGrupo(mudou, colunas: grade.colunas))
+        return Leitura(colunas: grade.colunas, celulas: celulas, maiorGrupo: Self.maiorGrupo(mudou, colunas: grade.colunas))
     }
 
     static func mediana(_ v: [Float]) -> Float {

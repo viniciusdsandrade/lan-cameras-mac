@@ -12,6 +12,8 @@ func uso() -> Never {
       camspike video --camera NOME [--stream principal|secundario] [--frames N] [--segundos S] [--saida PREFIXO]
       camspike ptz-medir --camera NOME [--direcao esquerda|direita|cima|baixo] [--velocidade V] [--ms N] [--sem-parar]
       camspike audio --camera NOME [--segundos N]
+      camspike vigiar --camera NOME [--stream principal|secundario] [--segundos N] [--sensibilidade baixa|media|alta]
+                      [--pasta CAMINHO] [--sem-som] [--forcar SEGUNDOS] [--mapa]
       camspike mover --camera NOME --direcao D [--velocidade V] [--ms N]
       camspike posicao listar|salvar|ir|apagar --camera NOME [--nome N] [--token T]
       camspike luz --camera NOME --modo automatico|ligada|desligada
@@ -465,4 +467,110 @@ func comandoAudio(_ opcoes: Opcoes) {
     print(String(format: "pacotes de áudio: %.1f por segundo (esperado ~25 = 40 ms cada), tipo de carga %@", porSegundo, r.tipos.map(String.init).joined(separator: ",")))
     print(String(format: "nível do som ambiente: RMS %.0f, pico %d (de 32768)", r.rms, r.pico))
     print(r.pacotes - antes > 10 && abs(porSegundo - 25) < 6 && r.tipos == [8] ? "RESULTADO: OK (áudio PCMA chegando em tempo real)" : "RESULTADO: FALHOU")
+}
+
+// MARK: - vigiar: a gravação por movimento direto na câmera (o que o detector vê, os arquivos)
+
+/// O detector de verdade, guardando as leituras para mostrar; com `forcarAte`, também conta como
+/// movimento o começo do vídeo (para conferir o arquivo sem ninguém passar na frente da câmera).
+final class AnalisadorDoCamspike: AnalisadorDeMovimento, @unchecked Sendable {
+    let detector: DetectorDeMovimento
+    let forcarAte: Double
+    private let trava = NSLock()
+    /// Mostra onde ficam as células que mudaram em cada análise com um grupo de 2 ou mais.
+    let mapa: Bool
+    private var _analises = 0
+    private var _comMovimento = 0
+    private var _tempo = 0.0
+    private var ultimaMostrada = -1.0
+
+    init(sensibilidade: SensibilidadeDeMovimento, forcarAte: Double, mapa: Bool) {
+        detector = DetectorDeMovimento(sensibilidade: sensibilidade)
+        self.forcarAte = forcarAte
+        self.mapa = mapa
+    }
+
+    func analisar(_ quadro: QuadroDecodificado, em tempo: Double) -> Bool {
+        let movimento = detector.analisar(quadro, em: tempo)
+        let l = detector.ultimaLeitura
+        let mostrar = trava.withLock { () -> Bool in
+            _analises += 1
+            if movimento { _comMovimento += 1 }
+            _tempo = tempo
+            guard mapa, l.tempo != ultimaMostrada, l.maiorGrupo >= 2 else { return false }
+            ultimaMostrada = l.tempo
+            return true
+        }
+        if mostrar {
+            let posicoes = l.celulas.map { "(\($0 % l.colunas),\($0 / l.colunas))" }.joined(separator: " ")
+            print(String(format: "    mapa %6.1f s  grupo %d%@: ", l.tempo, l.maiorGrupo, l.movimento ? " MOVIMENTO" : "") + posicoes)
+        }
+        return movimento || tempo < forcarAte
+    }
+
+    func reiniciar() { detector.reiniciar() }
+
+    var resumo: (quadros: Int, comMovimento: Int, tempo: Double) { trava.withLock { (_analises, _comMovimento, _tempo) } }
+}
+
+func comandoVigiar(_ opcoes: Opcoes) {
+    let camera = cameraEscolhida(opcoes)
+    let stream: StreamDeVideo = opcoes.texto("--stream") == "secundario" ? .secundario : .principal
+    let segundos = opcoes.decimal("--segundos", padrao: 60)
+    let sensibilidade = opcoes.texto("--sensibilidade").flatMap(SensibilidadeDeMovimento.init(rawValue:)) ?? .media
+    let pasta = opcoes.texto("--pasta").map { URL(fileURLWithPath: $0, isDirectory: true) }
+        ?? FileManager.default.temporaryDirectory.appendingPathComponent("camspike-vigiar", isDirectory: true)
+    let analisador = AnalisadorDoCamspike(sensibilidade: sensibilidade, forcarAte: opcoes.decimal("--forcar", padrao: 0),
+                                          mapa: opcoes.marcada("--mapa"))
+    let ajustes = VigiaDeMovimento.Ajustes(sensibilidade: sensibilidade, gravarSom: !opcoes.marcada("--sem-som"))
+    let vigia = VigiaDeMovimento(url: camera.urlDeVideo(stream), pasta: pasta, nome: camera.nome,
+                                 ajustes: ajustes, analisador: analisador)
+    let gravacoes = ColetorDeGravacoes()
+    vigia.aoMudarEstado = { e in
+        switch e {
+        case .erro(let m): print("estado: erro: \(Redact.texto(m))")
+        default: print("estado: \(e)")
+        }
+    }
+    vigia.aoGravar = { r in
+        switch r {
+        case .success(let g):
+            let bytes = (try? FileManager.default.attributesOfItem(atPath: g.arquivo.path)[.size] as? Int) ?? 0
+            print(String(format: "gravado: %@ (%.1f s, %.1f MB, %@)", g.arquivo.lastPathComponent, g.duracao,
+                         Double(bytes) / 1_000_000, g.comSom ? "com som" : "sem som"))
+            gravacoes.registrar(g, bytes: bytes)
+        case .failure(let erro):
+            print("falha ao gravar: \(erro)")
+        }
+    }
+    print("vigiando \(camera.nome) no vídeo \(stream == .principal ? "principal" : "secundário") por \(Int(segundos)) s, sensibilidade \(sensibilidade.rawValue)")
+    print("arquivos em \(pasta.path)")
+    vigia.iniciar()
+    let inicio = Date()
+    var ultimo = 0
+    while Date().timeIntervalSince(inicio) < segundos {
+        Thread.sleep(forTimeInterval: 0.25)
+        let s = Int(Date().timeIntervalSince(inicio))
+        guard s > ultimo else { continue }
+        ultimo = s
+        let l = analisador.detector.ultimaLeitura
+        print(String(format: "  %3d s  vídeo %5.1f s  células que mudaram %3d  maior grupo %3d  %@", s, analisador.resumo.tempo,
+                     l.celulasQueMudaram, l.maiorGrupo, l.movimento ? "MOVIMENTO" : "-"))
+    }
+    vigia.parar()
+    vigia.esperarArquivos(ate: 10)
+    let r = analisador.resumo
+    let feitas = gravacoes.lista
+    print("quadros analisados: \(r.quadros), com movimento: \(r.comMovimento) (\(r.quadros > 0 ? 100 * r.comMovimento / r.quadros : 0)%)")
+    print("gravações: \(feitas.count)" + (feitas.isEmpty ? "" : String(format: ", %.1f MB por minuto gravado",
+          Double(feitas.reduce(0) { $0 + $1.bytes }) / 1_000_000 / max(0.01, feitas.reduce(0) { $0 + $1.gravacao.duracao } / 60))))
+    print(r.quadros > 0 ? "RESULTADO: OK" : "RESULTADO: FALHOU (nenhum quadro chegou)")
+    exit(r.quadros > 0 ? 0 : 1)
+}
+
+final class ColetorDeGravacoes: @unchecked Sendable {
+    private let trava = NSLock()
+    private var _lista: [(gravacao: VigiaDeMovimento.Gravacao, bytes: Int)] = []
+    func registrar(_ g: VigiaDeMovimento.Gravacao, bytes: Int) { trava.withLock { _lista.append((g, bytes)) } }
+    var lista: [(gravacao: VigiaDeMovimento.Gravacao, bytes: Int)] { trava.withLock { _lista } }
 }
