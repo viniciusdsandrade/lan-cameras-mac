@@ -17,10 +17,13 @@ do fabricante.
 - Luz branca (automática, ligada, desligada) e rastreio automático.
 - Ouvir a câmera, falar por ela ao vivo, tocar sons prontos e texto falado.
 - Foto da lente atual.
-- Gravação por movimento: grava um vídeo com o som da câmera sempre que algo se mexe na
-  imagem, começando uns segundos antes de o movimento ser notado e seguindo enquanto ele durar.
-  Por padrão só à noite (das 18 h às 6 h); dá para escolher as câmeras, a sensibilidade, o som e a
-  qualidade. Segue com a janela fechada e a tela apagada.
+- Gravações do cartão: as câmeras gravam sozinhas no cartão de memória quando há movimento, com
+  o som, mesmo com o Mac e o celular desligados (é o que o app do fabricante configura nelas). O
+  app mostra o que cada uma gravou em cada noite, o espaço do cartão e se ela está gravando, e
+  converte cada gravação em MP4 para assistir ou guardar.
+- Gravação pelo Mac (opcional): uma cópia de cada movimento, com o som, gravada pelo Mac enquanto
+  ele estiver ligado, começando uns segundos antes e seguindo enquanto o movimento durar. Por
+  padrão só à noite (das 18 h às 6 h); segue com a janela fechada e a tela apagada.
 - Senha ou endereço trocados: se o app do fabricante (iCSee, XMEye) trocar a senha de uma
   câmera, ou o roteador mudar o endereço dela, o app percebe quando ela recusa a senha guardada
   ou para de responder no endereço guardado (que pode ter ficado vazio ou com outro aparelho),
@@ -40,7 +43,7 @@ do fabricante.
 | + e − | zoom digital; 0 volta ao normal |
 | M | liga e desliga o som da câmera |
 | ⇧⌘P | foto da lente atual |
-| ⇧⌘R | gravação por movimento (ajustes e gravações) |
+| ⇧⌘R | gravações (do cartão das câmeras e do Mac) |
 
 Na imagem, rolar ou pinçar no trackpad aproxima no ponto do cursor, arrastar move a
 imagem aproximada e o duplo clique volta ao normal.
@@ -49,7 +52,7 @@ O app só fica conectado às câmeras enquanto alguém pode ver o vídeo: ao min
 fechar a janela, ocultar o app ou quando o Mac dorme, ele solta as conexões (as câmeras
 aguentam poucas ao mesmo tempo) e as reabre ao voltar.
 
-A exceção é a gravação por movimento: ligada e no horário, ela mantém uma conexão com cada
+A exceção é a gravação pelo Mac: ligada e no horário, ela mantém uma conexão com cada
 câmera vigiada mesmo com a janela fechada e a tela apagada, e o Mac não dorme sozinho (a
 tela pode apagar). Fechar a tampa de um notebook sem monitor externo faz o Mac dormir, e a
 gravação para até ele acordar; encerrar o app (⌘Q) também a para. Fora do horário, as
@@ -64,10 +67,14 @@ no Mac:
 | --- | --- |
 | vídeo e áudio | RTSP (porta 554), RTP por TCP |
 | movimento e posições salvas | ONVIF PTZ (porta 8899) |
-| luz, rastreio e fala | DVRIP (porta 34567) |
+| luz, rastreio, fala e gravações do cartão | DVRIP (porta 34567) |
 | descoberta | WS-Discovery (UDP multicast) |
 
-A gravação por movimento compara o vídeo de cada câmera com o de meio segundo antes, numa
+As gravações do cartão vêm pelo DVRIP no formato da própria câmera (quadros de vídeo e de som
+intercalados) e viram MP4 sem recomprimir o vídeo. O som é o relógio: os quadros por segundo
+que a câmera declara são arredondados, e segui-los afastaria o som da imagem.
+
+A gravação pelo Mac compara o vídeo de cada câmera com o de meio segundo antes, numa
 grade de brilhos: desconta a mudança geral de exposição, aprende o ruído de cada ponto da
 imagem (o granulado da imagem noturna) e só conta o que ainda está mudando, então o relógio que
 a câmera escreve na imagem e uma luz que acende não disparam nada. O vídeo vai para o arquivo
@@ -117,12 +124,19 @@ detecção de movimento enxerga numa câmera, segundo a segundo e célula a cél
 swift run camspike vigiar --camera NOME --segundos 60 --mapa
 ```
 
+E para ver o que uma câmera gravou no cartão (e baixar uma gravação como MP4):
+
+```sh
+swift run camspike cartao --camera NOME --horas 12 --baixar ultimo --saida gravacao.mp4
+```
+
 ## Privacidade
 
 O app guarda as credenciais das câmeras só no Mac de quem o usa, em
 `~/Library/Application Support/Câmeras de Casa/`, e nunca as escreve em log. As fotos
 ficam em Imagens > Câmeras de Casa e as gravações, em Filmes > Câmeras de Casa, também
-só neste Mac. Este
+só neste Mac (as do cartão que já foram assistidas ficam uma semana em
+`~/Library/Caches/Câmeras de Casa/`). Este
 repositório não contém endereços, identificadores de aparelhos, credenciais nem
 imagens de nenhuma instalação. Para conferir antes de publicar qualquer mudança:
 
