@@ -4,7 +4,6 @@ import CamerasSessao
 
 struct TelaPrincipal: View {
     @EnvironmentObject var modelo: ModeloDoApp
-    @EnvironmentObject var paineis: Paineis
     @State private var mostrandoAjuda = false
 
     var body: some View {
@@ -16,7 +15,6 @@ struct TelaPrincipal: View {
         .frame(minWidth: 960, minHeight: 640)
         .toolbar { barra }
         .sheet(isPresented: $mostrandoAjuda) { AjudaView() }
-        .sheet(isPresented: $paineis.gravacao) { TelaDeGravacao(gravacao: modelo.gravacao).environmentObject(modelo) }
     }
 
     @ViewBuilder private var conteudo: some View {
@@ -32,6 +30,8 @@ struct TelaPrincipal: View {
                 } else {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+            case .gravacoes:
+                TelaDeGravacoes(cartoes: modelo.cartoes)
             }
         }
     }
@@ -41,14 +41,14 @@ struct TelaPrincipal: View {
             Picker("Câmera", selection: Binding(get: { modelo.selecao }, set: { modelo.selecionar($0) })) {
                 Text("Geral").tag(ModeloDoApp.Selecao.geral)
                 ForEach(modelo.cameras) { c in Text(c.nome).tag(ModeloDoApp.Selecao.camera(c.id)) }
+                Text("Gravações").tag(ModeloDoApp.Selecao.gravacoes)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .disabled(modelo.cameras.isEmpty)
         }
         ToolbarItem(placement: .automatic) {
-            BotaoDaGravacao(gravacao: modelo.gravacao) { paineis.gravacao = true }
-                .disabled(modelo.cameras.isEmpty)
+            IndicadorDaGravacaoNoMac(gravacao: modelo.gravacao)
         }
         ToolbarItem(placement: .automatic) {
             Button { mostrandoAjuda = true } label: { Image(systemName: "questionmark.circle") }

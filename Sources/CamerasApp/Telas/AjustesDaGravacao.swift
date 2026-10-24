@@ -3,54 +3,31 @@ import AppKit
 import CamerasCore
 import CamerasSessao
 
-/// Painéis que a barra e o menu abrem (o menu fica fora da janela).
-@MainActor
-final class Paineis: ObservableObject {
-    /// `--gravacao` abre direto nas gravações (útil para capturas de tela).
-    @Published var gravacao = ProcessInfo.processInfo.arguments.contains("--gravacao")
-}
-
-/// As gravações: o que as câmeras gravaram sozinhas no cartão (a aba que abre) e a gravação feita pelo
-/// Mac, uma cópia opcional enquanto ele estiver ligado (ajustes à esquerda, arquivos à direita).
-struct TelaDeGravacao: View {
-    enum Aba: Hashable { case cameras, mac }
-
+/// Os Ajustes do app (⌘,): por enquanto, só a gravação pelo Mac.
+struct AjustesDoApp: View {
     @EnvironmentObject var modelo: ModeloDoApp
-    @ObservedObject var gravacao: GravacaoPorMovimento
-    @Environment(\.dismiss) private var fechar
-    @State private var aba = Aba.cameras
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("Gravações", selection: $aba) {
-                Text("Nas câmeras").tag(Aba.cameras)
-                Text("Neste Mac").tag(Aba.mac)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 280)
-            .padding(.vertical, 10)
-            Divider()
-            switch aba {
-            case .cameras: AbaDasCameras(cartoes: modelo.cartoes)
-            case .mac: abaDoMac
-            }
-            Divider()
-            HStack {
-                Spacer()
-                Button("Fechar") { fechar() }.keyboardShortcut(.defaultAction)
-            }
-            .padding(12)
+        TabView {
+            AjustesDaGravacaoNoMac(gravacao: modelo.gravacao)
+                .tabItem { Label("Gravação no Mac", systemImage: "record.circle") }
         }
-        .frame(width: 900, height: 640)
+        .frame(width: 900, height: 620)
     }
+}
 
-    private var abaDoMac: some View {
+/// A gravação feita pelo Mac, uma cópia opcional enquanto ele estiver ligado: ajustes à esquerda,
+/// os arquivos dela à direita. (O que as câmeras gravam sozinhas no cartão fica em Gravações.)
+struct AjustesDaGravacaoNoMac: View {
+    @EnvironmentObject var modelo: ModeloDoApp
+    @ObservedObject var gravacao: GravacaoPorMovimento
+
+    var body: some View {
         HStack(alignment: .top, spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("Gravação pelo Mac").font(.title2.weight(.semibold))
-                    Text("Além do cartão das câmeras, o Mac pode gravar uma cópia, com o som, sempre que algo se mexe na imagem: começa uns segundos antes e segue enquanto houver movimento. Fica a salvo mesmo se alguém levar a câmera junto com o cartão, mas só grava com o Mac ligado.")
+                    Text("Gravação no Mac").font(.title2.weight(.semibold))
+                    Text("As câmeras já gravam sozinhas no cartão (veja em Gravações). Além disso, o Mac pode gravar uma cópia, com o som, sempre que algo se mexe na imagem: começa uns segundos antes e segue enquanto houver movimento. Fica a salvo mesmo se alguém levar a câmera junto com o cartão, mas só grava com o Mac ligado.")
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Toggle(isOn: $gravacao.ajustes.ligada) {
@@ -283,17 +260,18 @@ struct SeloDeGravacao: View {
     }
 }
 
-/// O botão da barra: abre as gravações e mostra de longe se o Mac está gravando alguma câmera.
-struct BotaoDaGravacao: View {
+/// Na barra, só com a gravação pelo Mac ligada: mostra de longe se ele está gravando e abre os Ajustes.
+struct IndicadorDaGravacaoNoMac: View {
     @ObservedObject var gravacao: GravacaoPorMovimento
-    let abrir: () -> Void
 
     var body: some View {
-        Button(action: abrir) {
-            Image(systemName: gravacao.gravandoAlguma ? "record.circle.fill" : "record.circle")
-                .foregroundStyle(gravacao.gravandoAlguma ? Color.red : (gravacao.vigiando ? Color.accentColor : Color.primary))
+        if gravacao.ajustes.ligada {
+            SettingsLink {
+                Image(systemName: gravacao.gravandoAlguma ? "record.circle.fill" : "record.circle")
+                    .foregroundStyle(gravacao.gravandoAlguma ? Color.red : (gravacao.vigiando ? Color.accentColor : Color.secondary))
+            }
+            .help(gravacao.gravandoAlguma ? "O Mac está gravando movimento" : "Gravação no Mac ligada")
+            .accessibilityLabel("Gravação no Mac")
         }
-        .help(gravacao.gravandoAlguma ? "Gravações (o Mac está gravando movimento)" : "Gravações")
-        .accessibilityLabel("Gravações")
     }
 }

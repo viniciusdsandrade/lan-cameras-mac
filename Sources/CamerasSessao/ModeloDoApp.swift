@@ -9,6 +9,8 @@ public final class ModeloDoApp: ObservableObject {
     public enum Selecao: Hashable, Sendable {
         case geral
         case camera(String)
+        /// O que as câmeras gravaram no cartão: sem vídeo ao vivo enquanto isso.
+        case gravacoes
     }
 
     @Published public private(set) var cameras: [CameraConfig] = []
@@ -40,7 +42,8 @@ public final class ModeloDoApp: ObservableObject {
     /// Câmeras cujas credenciais estão sendo pegas de novo (uma vez por câmera de cada vez).
     private var renovando: Set<String> = []
 
-    /// `argumentos`: `--abrir NOME`, `--qualidade leve|hd`, `--zoom N` abrem direto num estado (útil em testes).
+    /// `argumentos`: `--abrir NOME` (uma câmera, ou "gravações"), `--qualidade leve|hd`, `--zoom N` abrem
+    /// direto num estado (útil em testes e capturas de tela).
     /// `reidentificar`: como pegar de novo os dados de uma câmera que recusou a senha ou parou de
     /// responder (os testes trocam). `pastaDeGravacoes` e `agora`: onde a gravação por movimento
     /// guarda os arquivos e que horas são para ela (os testes trocam). `fonteDoCartao` e
@@ -98,10 +101,15 @@ public final class ModeloDoApp: ObservableObject {
     }
 
     /// No máximo 3 sessões RTSP abertas (a visão geral usa uma por câmera; a tela de uma câmera,
-    /// uma só): ao trocar de tela, o que não vale mais é fechado antes.
+    /// uma só; as gravações, nenhuma): ao trocar de tela, o que não vale mais é fechado antes.
     private func ajustarSessoes() {
         guard !pausado else { return }
         switch selecao {
+        case .gravacoes:
+            for s in sessoesGerais.values { s.parar() }
+            sessoesGerais = [:]
+            sessaoDaCamera?.encerrar()
+            sessaoDaCamera = nil
         case .geral:
             sessaoDaCamera?.encerrar()
             sessaoDaCamera = nil
@@ -346,10 +354,10 @@ public final class ModeloDoApp: ObservableObject {
         let a = argumentos
         func valor(_ nome: String) -> String? { a.firstIndex(of: nome).flatMap { $0 + 1 < a.count ? a[$0 + 1] : nil } }
         if let q = valor("--qualidade") { qualidadeHD = q != "leve" }
-        if let n = valor("--abrir"),
-           let c = cameras.first(where: { $0.nome.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
-                                            == n.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil) }) {
-            selecao = .camera(c.id)
+        func simples(_ s: String) -> String { s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil) }
+        if let n = valor("--abrir") {
+            if simples(n) == "gravacoes" { selecao = .gravacoes }
+            else if let c = cameras.first(where: { simples($0.nome) == simples(n) }) { selecao = .camera(c.id) }
         }
     }
 }

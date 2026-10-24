@@ -22,9 +22,9 @@ struct AjudaView: View {
                     bloco("Som",
                           "\"Ouvir\" liga o som da câmera (tecla M). \"Falar\" usa o microfone do Mac e a câmera repete no alto-falante dela; enquanto você fala o som da câmera fica mudo para não dar eco. Há também sons prontos e texto falado. A câmera só aceita uma fala por vez, e o volume começa em 30%: o alto-falante é alto.")
                     bloco("Gravações",
-                          "As câmeras gravam sozinhas no cartão de memória quando há movimento, com o som, mesmo com o Mac e o celular desligados. No botão de gravar da barra (⇧⌘R), a aba \"Nas câmeras\" mostra o que cada uma gravou em cada noite, para assistir ou guardar em Filmes > Câmeras de Casa.")
-                    bloco("Gravação pelo Mac",
-                          "Na aba \"Neste Mac\", o Mac também pode gravar uma cópia sempre que algo se mexe na imagem, começando uns segundos antes e seguindo enquanto houver movimento. Por padrão só à noite (das 18 h às 6 h). Segue com a janela minimizada ou fechada e com a tela apagada; o Mac não dorme sozinho enquanto vigia, mas para de gravar se dormir pela tampa ou se o app for encerrado.")
+                          "As câmeras gravam sozinhas no cartão de memória quando há movimento, com o som, mesmo com o Mac e o celular desligados. Em Gravações (na barra, ou ⇧⌘R), escolha a noite e a câmera: cada movimento aparece com a foto do instante, e a linha do tempo mostra a noite inteira. Clique num movimento para vê-lo; ▶ (ou espaço) baixa o vídeo do cartão e toca aqui mesmo; ← e → passam de um para outro; \"Guardar no Mac\" copia o vídeo para Filmes > Câmeras de Casa.")
+                    bloco("Gravação no Mac",
+                          "Em Ajustes (⌘,), o Mac também pode gravar uma cópia sempre que algo se mexe na imagem, começando uns segundos antes e seguindo enquanto houver movimento. Por padrão só à noite (das 18 h às 6 h). Segue com a janela minimizada ou fechada e com a tela apagada; o Mac não dorme sozinho enquanto vigia, mas para de gravar se dormir pela tampa ou se o app for encerrado.")
                     bloco("Senha das câmeras",
                           "Você não digita senha: o app pega o usuário e a senha com a própria câmera. Se o app do fabricante (iCSee, XMEye) trocar a senha dela, ou o roteador mudar o endereço, o app percebe e pega os novos sozinho. Se mesmo assim a imagem não voltar, use Câmeras > Procurar câmeras na rede.")
                     bloco("Permissões do macOS",
@@ -65,6 +65,9 @@ struct AjudaView: View {
                 linha("⇧⌘.", "Parar o movimento de todas")
                 linha("⇧⌘P", "Tirar foto")
                 linha("⇧⌘R", "Gravações")
+                linha("← →", "Movimento anterior e seguinte (em Gravações)")
+                linha("Espaço", "Tocar e pausar (em Gravações)")
+                linha("⌘,", "Ajustes (gravação no Mac)")
             }
         }
     }
