@@ -5,6 +5,7 @@ import CamerasSessao
 @main
 struct CamerasDeCasaApp: App {
     @StateObject private var modelo = ModeloDoApp()
+    @StateObject private var paineis = Paineis()
 
     /// `--largura 1400 --altura 1000`: tamanho inicial da janela (útil para capturas de tela).
     private static func argumento(_ nome: String) -> Double? {
@@ -14,7 +15,7 @@ struct CamerasDeCasaApp: App {
 
     var body: some Scene {
         WindowGroup("Câmeras de Casa") {
-            TelaPrincipal().environmentObject(modelo)
+            TelaPrincipal().environmentObject(modelo).environmentObject(paineis)
         }
         .defaultSize(width: Self.argumento("--largura") ?? 1240, height: Self.argumento("--altura") ?? 900)
         .commands {
@@ -31,6 +32,9 @@ struct CamerasDeCasaApp: App {
                 Button("Tirar foto") { modelo.sessaoDaCamera?.tirarFoto() }
                     .keyboardShortcut("p", modifiers: [.command, .shift])
                     .disabled(modelo.sessaoDaCamera == nil)
+                Button("Gravação por movimento…") { paineis.gravacao = true }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .disabled(modelo.cameras.isEmpty)
                 Divider()
                 Button("Procurar câmeras na rede") { modelo.procurarCameras() }
                     .disabled(modelo.procurando)

@@ -53,6 +53,7 @@ struct VisaoDaCamera: View {
                 .help("Renomear")
                 .accessibilityLabel("Renomear a câmera")
             Spacer()
+            SeloDeGravacao(gravacao: modelo.gravacao, camera: sessao.camera.id)
             if let sinal = sessao.estado?.sinalDoWiFi {
                 Label("Wi-Fi \(sinal)/100", systemImage: "wifi")
                     .font(.caption)

@@ -42,6 +42,7 @@ private struct CartaoDaCamera: View {
         VStack(alignment: .leading, spacing: 8) {
             LenteComRotulo(rotulo: camera.nome, distribuidor: sessao.distribuidor,
                            lente: camera.duasLentes ? .movel : .inteira, estado: sessao.estado, zoom: semZoom)
+                .overlay(alignment: .topTrailing) { SeloDeGravacao(gravacao: modelo.gravacao, camera: camera.id).padding(8) }
                 .onTapGesture { modelo.selecionar(.camera(camera.id)) }
             Button("Abrir \(camera.nome)") { modelo.selecionar(.camera(camera.id)) }
         }

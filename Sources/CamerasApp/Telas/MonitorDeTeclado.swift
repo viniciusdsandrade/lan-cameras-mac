@@ -63,6 +63,7 @@ final class MonitorDeTeclado {
         // atalhos de menu e digitação não são da câmera
         if !evento.modifierFlags.intersection([.command, .control, .option]).isEmpty { return evento }
         if NSApp.keyWindow?.firstResponder is NSText { return evento }
+        if NSApp.keyWindow?.sheetParent != nil { return evento }          // ajuda, ajustes da gravação
 
         if let d = Self.direcao(do: evento.keyCode) {
             if evento.type == .keyDown {

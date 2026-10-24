@@ -21,12 +21,14 @@ struct AjudaView: View {
                           "\"Salvar posição atual\" guarda para onde a câmera aponta. O app só apaga as posições que ele mesmo criou; as que já vinham na câmera ficam intactas.")
                     bloco("Som",
                           "\"Ouvir\" liga o som da câmera (tecla M). \"Falar\" usa o microfone do Mac e a câmera repete no alto-falante dela; enquanto você fala o som da câmera fica mudo para não dar eco. Há também sons prontos e texto falado. A câmera só aceita uma fala por vez, e o volume começa em 30%: o alto-falante é alto.")
+                    bloco("Gravação por movimento",
+                          "No botão de gravar da barra (⇧⌘R): com ela ligada, o app grava um vídeo com o som da câmera sempre que algo se mexe na imagem, começando uns segundos antes e seguindo enquanto houver movimento. Por padrão só à noite (das 18 h às 6 h), e dá para escolher as câmeras e a sensibilidade. Segue com a janela minimizada ou fechada e com a tela apagada; o Mac não dorme sozinho enquanto vigia, mas para de gravar se dormir pela tampa ou se o app for encerrado. Os vídeos ficam em Filmes > Câmeras de Casa.")
                     bloco("Senha das câmeras",
                           "Você não digita senha: o app pega o usuário e a senha com a própria câmera. Se o app do fabricante (iCSee, XMEye) trocar a senha dela, ou o roteador mudar o endereço, o app percebe e pega os novos sozinho. Se mesmo assim a imagem não voltar, use Câmeras > Procurar câmeras na rede.")
                     bloco("Permissões do macOS",
                           "Rede local: necessária para falar com as câmeras. Microfone: só quando você usa \"Falar\". Se negou sem querer, libere em Ajustes do Sistema > Privacidade e Segurança.")
                     bloco("Privacidade",
-                          "Usuário e senha das câmeras ficam só neste Mac, na pasta Application Support > Câmeras de Casa (acesso só seu). O app não abre nenhuma porta e só fala com as câmeras da sua rede; nada vai para a internet. As fotos ficam em Imagens > Câmeras de Casa.")
+                          "Usuário e senha das câmeras ficam só neste Mac, na pasta Application Support > Câmeras de Casa (acesso só seu). O app não abre nenhuma porta e só fala com as câmeras da sua rede; nada vai para a internet. As fotos ficam em Imagens > Câmeras de Casa, e as gravações, em Filmes > Câmeras de Casa.")
                     atalhos
                 }
                 .padding(22)
@@ -60,6 +62,7 @@ struct AjudaView: View {
                 linha("M", "Ouvir a câmera")
                 linha("⇧⌘.", "Parar o movimento de todas")
                 linha("⇧⌘P", "Tirar foto")
+                linha("⇧⌘R", "Gravação por movimento")
             }
         }
     }

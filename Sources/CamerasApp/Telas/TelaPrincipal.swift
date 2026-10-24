@@ -4,6 +4,7 @@ import CamerasSessao
 
 struct TelaPrincipal: View {
     @EnvironmentObject var modelo: ModeloDoApp
+    @EnvironmentObject var paineis: Paineis
     @State private var mostrandoAjuda = false
 
     var body: some View {
@@ -15,6 +16,7 @@ struct TelaPrincipal: View {
         .frame(minWidth: 960, minHeight: 640)
         .toolbar { barra }
         .sheet(isPresented: $mostrandoAjuda) { AjudaView() }
+        .sheet(isPresented: $paineis.gravacao) { TelaDeGravacao(gravacao: modelo.gravacao).environmentObject(modelo) }
     }
 
     @ViewBuilder private var conteudo: some View {
@@ -43,6 +45,10 @@ struct TelaPrincipal: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .disabled(modelo.cameras.isEmpty)
+        }
+        ToolbarItem(placement: .automatic) {
+            BotaoDaGravacao(gravacao: modelo.gravacao) { paineis.gravacao = true }
+                .disabled(modelo.cameras.isEmpty)
         }
         ToolbarItem(placement: .automatic) {
             Button { mostrandoAjuda = true } label: { Image(systemName: "questionmark.circle") }
