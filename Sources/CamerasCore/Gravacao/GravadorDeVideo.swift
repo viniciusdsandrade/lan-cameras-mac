@@ -14,8 +14,12 @@ public struct GravacaoErro: Error, CustomStringConvertible, Sendable {
 /// O arquivo é escrito em fragmentos de 2 s: se o app fechar de repente ou o Mac desligar, ele vale
 /// até o último fragmento. O primeiro quadro precisa ser de referência. Não é seguro entre threads:
 /// quem usa chama sempre da mesma fila.
+///
+/// Ao vivo, se o arquivo não der conta, o quadro é descartado (esperar atrasaria o vídeo que segue
+/// chegando). Convertendo um arquivo pronto (`esperarQuandoOcupado`), espera a vez de cada um.
 final class GravadorDeVideo {
     let destino: URL
+    private let esperarQuandoOcupado: Bool
     private let escritor: AVAssetWriter
     private let entradaDeVideo: AVAssetWriterInput
     private let entradaDeAudio: AVAssetWriterInput?
@@ -31,9 +35,11 @@ final class GravadorDeVideo {
     /// Um quadro foi perdido: os seguintes só se decodificam a partir do próximo de referência.
     private var aguardandoChave = true
 
-    init(destino: URL, codec: CodecDeVideo, descricao: CMVideoFormatDescription, comAudio: Bool) throws {
+    init(destino: URL, codec: CodecDeVideo, descricao: CMVideoFormatDescription, comAudio: Bool,
+         esperarQuandoOcupado: Bool = false) throws {
         self.destino = destino
         self.codec = codec
+        self.esperarQuandoOcupado = esperarQuandoOcupado
         descricaoDoVideo = descricao
         try FileManager.default.createDirectory(at: destino.deletingLastPathComponent(), withIntermediateDirectories: true)
         escritor = try AVAssetWriter(outputURL: destino, fileType: .mp4)
@@ -109,7 +115,7 @@ final class GravadorDeVideo {
             escritor.startSession(atSourceTime: Self.tempo(tempo))
             primeiroQuadro = tempo
         }
-        guard entradaDeVideo.isReadyForMoreMediaData else {
+        guard pronta(entradaDeVideo) else {
             aguardandoChave = true                         // perder um quadro estraga os que dependem dele
             return true
         }
@@ -135,11 +141,19 @@ final class GravadorDeVideo {
             }
         }
         if inicio < primeiro { return }
-        guard entradaDeAudio.isReadyForMoreMediaData,
+        guard pronta(entradaDeAudio),
               let amostra = Self.amostraDeAudio(amostras, descricao: descricaoDoAudio, tempo: inicio) else { return }
         if entradaDeAudio.append(amostra) {
             proximoAudio = inicio + Double(amostras.count) / LinhaDoTempo.taxaDoAudio
         }
+    }
+
+    /// Se a entrada aceita mais agora; convertendo, espera até 5 s por ela.
+    private func pronta(_ entrada: AVAssetWriterInput) -> Bool {
+        guard !entrada.isReadyForMoreMediaData, esperarQuandoOcupado else { return entrada.isReadyForMoreMediaData }
+        let limite = Date().addingTimeInterval(5)
+        while !entrada.isReadyForMoreMediaData, escritor.status == .writing, Date() < limite { usleep(2000) }
+        return entrada.isReadyForMoreMediaData
     }
 
     private static func amostraDeAudio(_ pcm: [Int16], descricao: CMAudioFormatDescription, tempo: Double) -> CMSampleBuffer? {

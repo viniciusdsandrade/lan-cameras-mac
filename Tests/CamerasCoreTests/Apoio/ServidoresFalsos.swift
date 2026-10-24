@@ -170,7 +170,7 @@ final class AparelhoQueNaoEhACamera: @unchecked Sendable {
     }
 }
 
-/// Servidor DVRIP em 127.0.0.1 (uma conexão): responde o JSON de cada pedido e guarda tudo.
+/// Servidor DVRIP em 127.0.0.1 (uma conexão por vez): responde o JSON de cada pedido e guarda tudo.
 final class ServidorDVRIPFalso: @unchecked Sendable {
     struct Quadro { let id: Int; let sessao: UInt32; let corpo: [UInt8]; let instante: TimeInterval }
 
@@ -178,14 +178,18 @@ final class ServidorDVRIPFalso: @unchecked Sendable {
     private let escuta: Int32
     /// Recebe (id, JSON do pedido); devolve o JSON da resposta, ou nil para não responder.
     private let responder: @Sendable (Int, [String: Any]) -> [String: Any]?
+    /// Quadros que seguem um pedido (id, corpo), como os pedaços de um arquivo baixado do cartão.
+    private let extras: (@Sendable (Int, [String: Any]) -> [(id: Int, corpo: [UInt8])])?
     private let trava = NSLock()
     private var _quadros: [Quadro] = []
 
-    init(responder: @escaping @Sendable (Int, [String: Any]) -> [String: Any]?) throws {
+    init(responder: @escaping @Sendable (Int, [String: Any]) -> [String: Any]?,
+         extras: (@Sendable (Int, [String: Any]) -> [(id: Int, corpo: [UInt8])])? = nil) throws {
         let (s, p) = try abrirEscutaLocal()
         escuta = s
         porta = p
         self.responder = responder
+        self.extras = extras
         let t = Thread { [self] in servir() }
         t.name = "dvrip-falso"
         t.start()
@@ -210,6 +214,8 @@ final class ServidorDVRIPFalso: @unchecked Sendable {
         while true {
             let c = accept(escuta, nil, nil)
             if c < 0 { return }
+            var um: Int32 = 1                             // cliente que desiste no meio não derruba o teste
+            setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &um, socklen_t(MemoryLayout<Int32>.size))
             atender(c)
             close(c)
         }
@@ -224,16 +230,20 @@ final class ServidorDVRIPFalso: @unchecked Sendable {
             trava.withLock { _quadros.append(Quadro(id: id, sessao: sessao, corpo: corpo, instante: ProcessInfo.processInfo.systemUptime)) }
             var texto = corpo
             while let u = texto.last, u == 0 || u == 0x0A { texto.removeLast() }
-            guard let json = (try? JSONSerialization.jsonObject(with: Data(texto))) as? [String: Any],
-                  let resposta = responder(id, json),
-                  let dados = try? JSONSerialization.data(withJSONObject: resposta) else { continue }
-            let corpoResposta = [UInt8](dados) + [0x0A, 0x00]
-            var h = [UInt8](repeating: 0, count: 20)
-            h[0] = 0xFF
-            h[4] = 0x42                                   // a sessão que o login devolve
-            h[14] = UInt8((id + 1) & 0xFF); h[15] = UInt8((id + 1) >> 8)
-            h[16] = UInt8(corpoResposta.count & 0xFF); h[17] = UInt8((corpoResposta.count >> 8) & 0xFF)
-            enviarTudo(c, h + corpoResposta)
+            guard let json = (try? JSONSerialization.jsonObject(with: Data(texto))) as? [String: Any] else { continue }
+            if let resposta = responder(id, json), let dados = try? JSONSerialization.data(withJSONObject: resposta) {
+                enviarQuadro(c, id: id + 1, [UInt8](dados) + [0x0A, 0x00])
+            }
+            for e in extras?(id, json) ?? [] { enviarQuadro(c, id: e.id, e.corpo) }
         }
+    }
+
+    private func enviarQuadro(_ c: Int32, id: Int, _ corpo: [UInt8]) {
+        var h = [UInt8](repeating: 0, count: 20)
+        h[0] = 0xFF
+        h[4] = 0x42                                       // a sessão que o login devolve
+        h[14] = UInt8(id & 0xFF); h[15] = UInt8(id >> 8)
+        for k in 0..<4 { h[16 + k] = UInt8((corpo.count >> (8 * k)) & 0xFF) }
+        enviarTudo(c, h + corpo)
     }
 }
