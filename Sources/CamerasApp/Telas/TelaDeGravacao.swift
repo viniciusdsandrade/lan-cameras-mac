@@ -6,41 +6,34 @@ import CamerasSessao
 /// Painéis que a barra e o menu abrem (o menu fica fora da janela).
 @MainActor
 final class Paineis: ObservableObject {
-    /// `--gravacao` abre direto nos ajustes da gravação (útil para capturas de tela).
+    /// `--gravacao` abre direto nas gravações (útil para capturas de tela).
     @Published var gravacao = ProcessInfo.processInfo.arguments.contains("--gravacao")
 }
 
-/// Ajustes da gravação por movimento, à esquerda, e as gravações, à direita: de manhã, o que gravou
-/// à noite aparece de cara.
+/// As gravações: o que as câmeras gravaram sozinhas no cartão (a aba que abre) e a gravação feita pelo
+/// Mac, uma cópia opcional enquanto ele estiver ligado (ajustes à esquerda, arquivos à direita).
 struct TelaDeGravacao: View {
+    enum Aba: Hashable { case cameras, mac }
+
     @EnvironmentObject var modelo: ModeloDoApp
     @ObservedObject var gravacao: GravacaoPorMovimento
     @Environment(\.dismiss) private var fechar
+    @State private var aba = Aba.cameras
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 0) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text("Gravação por movimento").font(.title2.weight(.semibold))
-                        Text("Grava um vídeo com o som da câmera sempre que algo se mexe na imagem: começa uns segundos antes de o movimento ser notado e segue enquanto ele durar.")
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Toggle(isOn: $gravacao.ajustes.ligada) {
-                            Text("Gravar quando houver movimento").font(.headline)
-                        }
-                        .toggleStyle(.switch)
-                        quando
-                        cameras
-                        deteccao
-                        cuidados
-                    }
-                    .padding(22)
-                }
-                .frame(width: 490)
-                Divider()
-                arquivos
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        VStack(spacing: 0) {
+            Picker("Gravações", selection: $aba) {
+                Text("Nas câmeras").tag(Aba.cameras)
+                Text("Neste Mac").tag(Aba.mac)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 280)
+            .padding(.vertical, 10)
+            Divider()
+            switch aba {
+            case .cameras: AbaDasCameras(cartoes: modelo.cartoes)
+            case .mac: abaDoMac
             }
             Divider()
             HStack {
@@ -49,7 +42,33 @@ struct TelaDeGravacao: View {
             }
             .padding(12)
         }
-        .frame(width: 900, height: 620)
+        .frame(width: 900, height: 640)
+    }
+
+    private var abaDoMac: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Gravação pelo Mac").font(.title2.weight(.semibold))
+                    Text("Além do cartão das câmeras, o Mac pode gravar uma cópia, com o som, sempre que algo se mexe na imagem: começa uns segundos antes e segue enquanto houver movimento. Fica a salvo mesmo se alguém levar a câmera junto com o cartão, mas só grava com o Mac ligado.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Toggle(isOn: $gravacao.ajustes.ligada) {
+                        Text("Gravar também neste Mac").font(.headline)
+                    }
+                    .toggleStyle(.switch)
+                    quando
+                    cameras
+                    deteccao
+                    cuidados
+                }
+                .padding(22)
+            }
+            .frame(width: 490)
+            Divider()
+            arquivos
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
         .onAppear { gravacao.recarregarRecentes() }
     }
 
@@ -264,7 +283,7 @@ struct SeloDeGravacao: View {
     }
 }
 
-/// O botão da barra: abre os ajustes e mostra de longe se alguma câmera está gravando.
+/// O botão da barra: abre as gravações e mostra de longe se o Mac está gravando alguma câmera.
 struct BotaoDaGravacao: View {
     @ObservedObject var gravacao: GravacaoPorMovimento
     let abrir: () -> Void
@@ -274,7 +293,7 @@ struct BotaoDaGravacao: View {
             Image(systemName: gravacao.gravandoAlguma ? "record.circle.fill" : "record.circle")
                 .foregroundStyle(gravacao.gravandoAlguma ? Color.red : (gravacao.vigiando ? Color.accentColor : Color.primary))
         }
-        .help(gravacao.gravandoAlguma ? "Gravando movimento" : (gravacao.ajustes.ligada ? "Gravação por movimento ligada" : "Gravação por movimento"))
-        .accessibilityLabel("Gravação por movimento")
+        .help(gravacao.gravandoAlguma ? "Gravações (o Mac está gravando movimento)" : "Gravações")
+        .accessibilityLabel("Gravações")
     }
 }

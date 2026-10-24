@@ -32,7 +32,7 @@ struct CamerasDeCasaApp: App {
                 Button("Tirar foto") { modelo.sessaoDaCamera?.tirarFoto() }
                     .keyboardShortcut("p", modifiers: [.command, .shift])
                     .disabled(modelo.sessaoDaCamera == nil)
-                Button("Gravação por movimento…") { paineis.gravacao = true }
+                Button("Gravações…") { paineis.gravacao = true }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                     .disabled(modelo.cameras.isEmpty)
                 Divider()
