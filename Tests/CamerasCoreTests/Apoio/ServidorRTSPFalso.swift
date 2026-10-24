@@ -21,19 +21,26 @@ final class ServidorRTSPFalso: @unchecked Sendable {
     private let calarPrimeiraConexaoApos: Int?
     /// Status da resposta ao DESCRIBE: 401 é a câmera recusando o usuário e a senha da URL.
     private let statusDoDescribe: Int
+    /// Manda o som junto com o vídeo, como a câmera: depois de cada quadro, o som até o próximo
+    /// (quadros de 0,1 s; pacotes de 40 ms com um apito).
+    private let audioIntercalado: Bool
+    /// Pausa depois de cada quadro, em microssegundos: o vídeo chega num ritmo parecido com o real.
+    private let pausaPorQuadro: useconds_t
     private let trava = NSLock()
     private var _metodos: [String] = []
     private var _conexoes = 0
 
     init(sdp: String, pacotesDeVideo: [[UInt8]], audioAntesDoPlay: [[UInt8]] = [],
          cortarPrimeiraConexaoApos: Int? = nil, calarPrimeiraConexaoApos: Int? = nil,
-         statusDoDescribe: Int = 200) throws {
+         statusDoDescribe: Int = 200, audioIntercalado: Bool = false, pausaPorQuadro: useconds_t = 0) throws {
         self.sdp = sdp
         self.pacotesDeVideo = pacotesDeVideo
         self.audioAntesDoPlay = audioAntesDoPlay
         self.cortarPrimeiraConexaoApos = cortarPrimeiraConexaoApos
         self.calarPrimeiraConexaoApos = calarPrimeiraConexaoApos
         self.statusDoDescribe = statusDoDescribe
+        self.audioIntercalado = audioIntercalado
+        self.pausaPorQuadro = pausaPorQuadro
 
         let s = socket(AF_INET, SOCK_STREAM, 0)
         guard s >= 0 else { throw Falha(motivo: "socket") }
@@ -72,6 +79,8 @@ final class ServidorRTSPFalso: @unchecked Sendable {
         while true {
             let c = accept(escuta, nil, nil)
             if c < 0 { return }
+            var um: Int32 = 1                                 // cliente que some no meio não derruba o teste
+            setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &um, socklen_t(MemoryLayout<Int32>.size))
             let numero = trava.withLock { () -> Int in _conexoes += 1; return _conexoes }
             atender(c, primeira: numero == 1)
             close(c)
@@ -108,12 +117,21 @@ final class ServidorRTSPFalso: @unchecked Sendable {
                 for p in audioAntesDoPlay { enviarQuadro(c, canal: 2, p) }
                 enviar(c, resposta(cseq, ["Session: \(1000 + setups)", "Range: npt=now-"]))
                 var enviados = 0
+                var quadros = 0
+                var pacotesDeAudio = 0
                 for p in pacotesDeVideo {
                     if primeira, let n = cortarPrimeiraConexaoApos, enviados >= n { return }        // fecha a conexão
                     if primeira, let n = calarPrimeiraConexaoApos, enviados >= n { break }          // fica mudo, conexão aberta
-                    enviarQuadro(c, canal: 0, p)
+                    guard enviarQuadro(c, canal: 0, p) else { return }                              // o cliente foi embora
                     enviados += 1
                     usleep(1500)
+                    guard p.count > 1, p[1] & 0x80 != 0 else { continue }                           // fim de um quadro
+                    quadros += 1
+                    while audioIntercalado, pacotesDeAudio * 320 < quadros * 800 {
+                        enviarQuadro(c, canal: 2, Empacotador.audio(sequencia: UInt16(pacotesDeAudio), tom: true))
+                        pacotesDeAudio += 1
+                    }
+                    if pausaPorQuadro > 0 { usleep(pausaPorQuadro) }
                 }
             case "TEARDOWN":
                 return
@@ -145,16 +163,19 @@ final class ServidorRTSPFalso: @unchecked Sendable {
         }
     }
 
-    private func enviarQuadro(_ c: Int32, canal: UInt8, _ pacote: [UInt8]) {
+    @discardableResult
+    private func enviarQuadro(_ c: Int32, canal: UInt8, _ pacote: [UInt8]) -> Bool {
         enviar(c, [0x24, canal, UInt8(pacote.count >> 8), UInt8(pacote.count & 0xFF)] + pacote)
     }
 
-    private func enviar(_ c: Int32, _ dados: [UInt8]) {
+    @discardableResult
+    private func enviar(_ c: Int32, _ dados: [UInt8]) -> Bool {
         var enviados = 0
         while enviados < dados.count {
             let n = dados.withUnsafeBytes { send(c, $0.baseAddress! + enviados, dados.count - enviados, 0) }
-            if n <= 0 { return }
+            if n <= 0 { return false }
             enviados += n
         }
+        return true
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+@testable import CamerasCore
 
 /// Faz o caminho inverso do depacotador: transforma NALs em pacotes RTP (RFC 6184 e
 /// RFC 7798), usando NAL único, agregado (STAP-A / AP) e fragmentado (FU-A / FU).
@@ -62,10 +63,18 @@ enum Empacotador {
         }
     }
 
-    /// Um pacote de áudio PCMA (tipo 8) de 40 ms, só silêncio.
-    static func audio(sequencia: UInt16) -> [UInt8] {
-        cabecalho(sequencia: sequencia, timestamp: UInt32(sequencia) * 320, marcador: false, pt: 8)
-            + [UInt8](repeating: 0xD5, count: 320)
+    /// Um pacote de áudio PCMA (tipo 8) de 40 ms: silêncio ou, com `tom`, um apito de 440 Hz.
+    static func audio(sequencia: UInt16, tom: Bool = false) -> [UInt8] {
+        let carga: [UInt8]
+        if tom {
+            let pcm = (0..<320).map { i -> Int16 in
+                Int16(8000 * sin(2 * Double.pi * 440 * Double(Int(sequencia) * 320 + i) / 8000))
+            }
+            carga = ALaw.codificar(pcm)
+        } else {
+            carga = [UInt8](repeating: 0xD5, count: 320)
+        }
+        return cabecalho(sequencia: sequencia, timestamp: UInt32(sequencia) * 320, marcador: false, pt: 8) + carga
     }
 
     private static func montar(_ quadros: [[[UInt8]]], pt: UInt8, passo: UInt32,

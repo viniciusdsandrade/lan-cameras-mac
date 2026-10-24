@@ -1,12 +1,20 @@
 import Foundation
 
-/// Vídeo sintético dos testes: barras de cor geradas pelo ffmpeg (160x96, 20 quadros,
-/// um quadro de referência a cada 10), sem nenhuma imagem de câmera.
+/// Vídeo sintético dos testes, gerado pelo ffmpeg, sem nenhuma imagem de câmera:
+/// - `amostra-h264` e `amostra-h265`: barras de cor (160x96, 20 quadros, um quadro de referência a cada 10);
+/// - `amostra-movimento-h264`: fundo cinza com granulado, como a imagem noturna (320x180, 10 quadros por
+///   segundo, 40 quadros, um de referência a cada 10); dos quadros 15 a 29 uma caixa clara atravessa a cena.
 enum Amostras {
     struct Falta: Error { let nome: String }
 
+    /// Quadros (0 a 39) em que a caixa da amostra de movimento aparece.
+    static let quadrosComMovimento = 15...29
+
     static func nals(h265: Bool) throws -> [[UInt8]] {
-        let nome = h265 ? "amostra-h265" : "amostra-h264"
+        try nals(arquivo: h265 ? "amostra-h265" : "amostra-h264")
+    }
+
+    static func nals(arquivo nome: String) throws -> [[UInt8]] {
         guard let url = Bundle.module.url(forResource: nome, withExtension: "annexb", subdirectory: "Fixtures") else {
             throw Falta(nome: nome)
         }
@@ -15,9 +23,17 @@ enum Amostras {
 
     /// Os NALs agrupados por quadro: parâmetros que precedem a fatia ficam com ela.
     static func quadros(h265: Bool) throws -> [[[UInt8]]] {
+        try quadros(try nals(h265: h265), h265: h265)
+    }
+
+    static func quadrosComMovimentoH264() throws -> [[[UInt8]]] {
+        try quadros(try nals(arquivo: "amostra-movimento-h264"), h265: false)
+    }
+
+    private static func quadros(_ todos: [[UInt8]], h265: Bool) throws -> [[[UInt8]]] {
         var saida: [[[UInt8]]] = []
         var pendentes: [[UInt8]] = []
-        for nal in try nals(h265: h265) {
+        for nal in todos {
             pendentes.append(nal)
             let tipo = h265 ? Int((nal[0] >> 1) & 0x3F) : Int(nal[0] & 0x1F)
             let ehFatia = h265 ? tipo <= 21 : (1...5).contains(tipo)

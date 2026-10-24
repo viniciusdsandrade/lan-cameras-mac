@@ -51,6 +51,8 @@ public final class FluxoDeVideo: @unchecked Sendable {
     private let _aoReceberQuadro = Caixa<(@Sendable (QuadroDecodificado) -> Void)?>(nil)
     private let _aoMudarEstado = Caixa<(@Sendable (Estado) -> Void)?>(nil)
     private let _aoReceberAudio = Caixa<(@Sendable (RTPPacket) -> Void)?>(nil)
+    private let _aoReceberUnidade = Caixa<(@Sendable (UnidadeDeAcesso) -> Void)?>(nil)
+    private let _aoConectar = Caixa<(@Sendable (SDP) -> Void)?>(nil)
     private let _aoRecusarCredenciais = Caixa<(@Sendable () -> Void)?>(nil)
     private let _aoNaoResponder = Caixa<(@Sendable (Bool) -> Void)?>(nil)
 
@@ -81,6 +83,18 @@ public final class FluxoDeVideo: @unchecked Sendable {
     public var aoReceberAudio: (@Sendable (RTPPacket) -> Void)? {
         get { _aoReceberAudio.valor }
         set { _aoReceberAudio.valor = newValue }
+    }
+    /// Cada quadro ainda comprimido, como a câmera mandou (para gravar sem recomprimir). Chega na
+    /// thread do RTSP, na mesma ordem dos pacotes de áudio, antes de o quadro ser decodificado.
+    public var aoReceberUnidade: (@Sendable (UnidadeDeAcesso) -> Void)? {
+        get { _aoReceberUnidade.valor }
+        set { _aoReceberUnidade.valor = newValue }
+    }
+    /// Uma conexão nova ficou pronta, antes do primeiro quadro dela: o SDP diz o codec, os
+    /// parâmetros do vídeo e se há áudio. Os relógios RTP recomeçam a cada conexão.
+    public var aoConectar: (@Sendable (SDP) -> Void)? {
+        get { _aoConectar.valor }
+        set { _aoConectar.valor = newValue }
     }
     /// A câmera recusou o usuário e a senha da URL. Chega depois do estado de erro, uma vez só.
     public var aoRecusarCredenciais: (@Sendable () -> Void)? {
@@ -173,8 +187,9 @@ public final class FluxoDeVideo: @unchecked Sendable {
                 aoFicarPronto: { [self] sdp in
                     let codec = try sessao.preparar(sdp: sdp) { [self] q in quandoChegarQuadro(q) }
                     sessaoCodec.valor = codec.nome
+                    _aoConectar.valor?(sdp)
                 },
-                aoReceberVideo: { sessao.receber($0) },
+                aoReceberVideo: { [self] p in sessao.receber(p, aoUnidade: _aoReceberUnidade.valor) },
                 aoReceberAudio: { [self] p in _aoReceberAudio.valor?(p) })
         } catch {
             if estaRodando() { mudar(.erro(Self.resumo(error))) }
@@ -214,9 +229,12 @@ public final class FluxoDeVideo: @unchecked Sendable {
             return codec
         }
 
-        func receber(_ p: RTPPacket) {
+        func receber(_ p: RTPPacket, aoUnidade: (@Sendable (UnidadeDeAcesso) -> Void)?) {
             guard let depacotador, let decodificador else { return }
-            for au in depacotador.empurrar(p) { decodificador.decodificar(au) }
+            for au in depacotador.empurrar(p) {
+                aoUnidade?(au)
+                decodificador.decodificar(au)
+            }
         }
 
         func encerrar() {
