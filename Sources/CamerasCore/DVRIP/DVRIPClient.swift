@@ -63,14 +63,14 @@ public final class DVRIPClient: @unchecked Sendable {
 
     // MARK: - Quadros
 
-    private var sessaoTexto: String { String(format: "0x%08X", sessao) }
+    var sessaoTexto: String { String(format: "0x%08X", sessao) }
 
-    private static func jsonComTerminador(_ obj: [String: Any]) throws -> [UInt8] {
+    static func jsonComTerminador(_ obj: [String: Any]) throws -> [UInt8] {
         let dados = try JSONSerialization.data(withJSONObject: obj, options: [])
         return [UInt8](dados) + [0x0A, 0x00]
     }
 
-    private func enviarQuadro(_ id: Int, _ corpo: [UInt8]) throws {
+    func enviarQuadro(_ id: Int, _ corpo: [UInt8]) throws {
         sequencia &+= 1
         var cab = [UInt8](repeating: 0, count: 20)
         cab[0] = 0xFF
@@ -88,9 +88,9 @@ public final class DVRIPClient: @unchecked Sendable {
         b[i + 2] = UInt8((v >> 16) & 0xFF); b[i + 3] = UInt8((v >> 24) & 0xFF)
     }
 
-    private func lerExato(_ n: Int) throws -> [UInt8] {
+    private func lerExato(_ n: Int, timeout: TimeInterval? = nil) throws -> [UInt8] {
         var saida: [UInt8] = []
-        let limite = Date().addingTimeInterval(timeout)
+        let limite = Date().addingTimeInterval(timeout ?? self.timeout)
         while saida.count < n {
             let restante = limite.timeIntervalSinceNow
             if restante <= 0 { throw DVRIPErro("a câmera não respondeu pelo DVRIP") }
@@ -101,22 +101,29 @@ public final class DVRIPClient: @unchecked Sendable {
         return saida
     }
 
-    private func receberQuadro() throws -> [UInt8] {
-        let cab = try lerExato(20)
+    /// Um quadro inteiro: o id da mensagem (bytes 14 e 15) e o corpo. `timeout`: quanto esperar o
+    /// começo dele (o padrão é o da conexão).
+    func receberQuadro(timeout: TimeInterval? = nil) throws -> (id: Int, corpo: [UInt8]) {
+        let cab = try lerExato(20, timeout: timeout)
         let tam = Int(cab[16]) | Int(cab[17]) << 8 | Int(cab[18]) << 16 | Int(cab[19]) << 24
         guard tam >= 0, tam <= 4 << 20 else { throw DVRIPErro("resposta da câmera com tamanho absurdo") }
-        return tam > 0 ? try lerExato(tam) : []
+        return (Int(cab[14]) | Int(cab[15]) << 8, tam > 0 ? try lerExato(tam) : [])
+    }
+
+    /// O JSON de um corpo (vazio se não for JSON).
+    static func json(_ corpo: [UInt8]) -> [String: Any] {
+        var dados = corpo
+        while let u = dados.last, u == 0 || u == 0x0A { dados.removeLast() }
+        return (try? JSONSerialization.jsonObject(with: Data(dados))) as? [String: Any] ?? [:]
     }
 
     /// Envia um JSON e devolve a resposta como dicionário (vazio se não for JSON).
     func pedir(_ id: Int, _ corpo: [String: Any]) throws -> [String: Any] {
         try enviarQuadro(id, try Self.jsonComTerminador(corpo))
-        var dados = try receberQuadro()
-        while let u = dados.last, u == 0 || u == 0x0A { dados.removeLast() }
-        return (try? JSONSerialization.jsonObject(with: Data(dados))) as? [String: Any] ?? [:]
+        return Self.json(try receberQuadro().corpo)
     }
 
-    private static func ret(_ r: [String: Any]) -> Int? { (r["Ret"] as? NSNumber)?.intValue }
+    static func ret(_ r: [String: Any]) -> Int? { (r["Ret"] as? NSNumber)?.intValue }
 
     // MARK: - Operações
 
