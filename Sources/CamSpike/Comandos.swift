@@ -14,6 +14,7 @@ func uso() -> Never {
       camspike audio --camera NOME [--segundos N]
       camspike vigiar --camera NOME [--stream principal|secundario] [--segundos N] [--sensibilidade baixa|media|alta]
                       [--pasta CAMINHO] [--sem-som] [--forcar SEGUNDOS] [--mapa]
+      camspike cartao --camera NOME [--horas N] [--baixar N|ultimo] [--saida ARQUIVO.mp4]
       camspike mover --camera NOME --direcao D [--velocidade V] [--ms N]
       camspike posicao listar|salvar|ir|apagar --camera NOME [--nome N] [--token T]
       camspike luz --camera NOME --modo automatico|ligada|desligada
@@ -573,4 +574,66 @@ final class ColetorDeGravacoes: @unchecked Sendable {
     private var _lista: [(gravacao: VigiaDeMovimento.Gravacao, bytes: Int)] = []
     func registrar(_ g: VigiaDeMovimento.Gravacao, bytes: Int) { trava.withLock { _lista.append((g, bytes)) } }
     var lista: [(gravacao: VigiaDeMovimento.Gravacao, bytes: Int)] { trava.withLock { _lista } }
+}
+
+// MARK: - cartao: o que a câmera gravou sozinha no cartão de memória (só lê)
+
+/// O resultado de uma tarefa, entregue de outra thread.
+final class CaixaDeResultado<T: Sendable>: @unchecked Sendable { var r: Result<T, Error>? }
+
+/// Roda código assíncrono numa ferramenta de linha de comando, esperando o resultado.
+func esperarResultado<T: Sendable>(_ f: @escaping @Sendable () async throws -> T) throws -> T {
+    let caixa = CaixaDeResultado<T>()
+    let pronto = DispatchSemaphore(value: 0)
+    Task {
+        do { caixa.r = .success(try await f()) } catch { caixa.r = .failure(error) }
+        pronto.signal()
+    }
+    pronto.wait()
+    return try caixa.r!.get()
+}
+
+func comandoCartao(_ opcoes: Opcoes) {
+    let camera = cameraEscolhida(opcoes)
+    let cartao = CartaoDaCamera(camera: camera)
+    func sim(_ v: Bool?) -> String { v.map { $0 ? "sim" : "não" } ?? "?" }
+    do {
+        let e = try cartao.estado()
+        print(e.temCartao ? "cartão: \(e.livreMB ?? 0) MB livres de \(e.totalMB ?? 0) MB" : "cartão: nenhum")
+        print("grava por movimento: \(sim(e.gravaPorMovimento)), só pessoas: \(sim(e.detectaPessoas)), "
+              + "com som: \(sim(e.comSom)), cheio grava por cima: \(sim(e.sobrescreve))")
+    } catch { print("estado do cartão: \(error)") }
+
+    let horas = opcoes.decimal("--horas", padrao: 12)
+    let agora = Date()
+    let lista: [GravacaoDoCartao]
+    do { lista = try cartao.gravacoes(de: agora.addingTimeInterval(-horas * 3600), ate: agora) }
+    catch { print("RESULTADO: FALHOU (\(error))"); exit(1) }
+    let hora = DateFormatter()
+    hora.dateFormat = "dd/MM HH:mm:ss"
+    print("\(lista.count) gravações nas últimas \(Int(horas)) h")
+    for (i, g) in lista.enumerated() {
+        print(String(format: "  %3d) %@ – %@  %4.0f s  %6d KB  %@", i, hora.string(from: g.inicio), hora.string(from: g.fim),
+                     g.duracao, g.bytes / 1024, "\(g.motivo)"))
+    }
+    guard let pedido = opcoes.texto("--baixar") else { print("RESULTADO: OK"); return }
+    let indice = pedido == "ultimo" ? lista.count - 1 : (Int(pedido) ?? -1)
+    guard lista.indices.contains(indice) else { fputs("não há a gravação \(pedido)\n", stderr); exit(2) }
+    let g = lista[indice]
+    let destino = URL(fileURLWithPath: opcoes.texto("--saida") ?? FileManager.default.temporaryDirectory.appendingPathComponent("cartao.mp4").path)
+    let inicio = Date()
+    var proximoAviso = 0.25
+    do {
+        let bytes = try cartao.baixar(g) { p in
+            if p >= proximoAviso { print(String(format: "  baixando… %.0f%%", p * 100)); proximoAviso += 0.25 }
+            return true
+        }
+        print(String(format: "baixado: %d bytes em %.1f s", bytes.count, Date().timeIntervalSince(inicio)))
+        let r = try esperarResultado { try await ConversorDoCartao.converter(bytes, para: destino) }
+        print(String(format: "MP4: %@ (%d quadros, %.1f s, %@)", destino.path, r.quadros, r.duracao, r.comSom ? "com som" : "sem som"))
+        print("RESULTADO: OK")
+    } catch {
+        print("RESULTADO: FALHOU (\(error))")
+        exit(1)
+    }
 }
