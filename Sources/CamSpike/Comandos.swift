@@ -14,7 +14,7 @@ func uso() -> Never {
       camspike audio --camera NOME [--segundos N]
       camspike vigiar --camera NOME [--stream principal|secundario] [--segundos N] [--sensibilidade baixa|media|alta]
                       [--pasta CAMINHO] [--sem-som] [--forcar SEGUNDOS] [--mapa]
-      camspike cartao --camera NOME [--horas N] [--baixar N|ultimo] [--saida ARQUIVO.mp4]
+      camspike cartao --camera NOME [--horas N] [--baixar N|ultimo | --foto N|ultimo] [--saida ARQUIVO]
       camspike mover --camera NOME --direcao D [--velocidade V] [--ms N]
       camspike posicao listar|salvar|ir|apagar --camera NOME [--nome N] [--token T]
       camspike luz --camera NOME --modo automatico|ligada|desligada
@@ -607,8 +607,23 @@ func comandoCartao(_ opcoes: Opcoes) {
     let horas = opcoes.decimal("--horas", padrao: 12)
     let agora = Date()
     let lista: [GravacaoDoCartao]
-    do { lista = try cartao.gravacoes(de: agora.addingTimeInterval(-horas * 3600), ate: agora) }
+    let fotos: [GravacaoDoCartao]
+    do { (lista, fotos) = try cartao.eventos(de: agora.addingTimeInterval(-horas * 3600), ate: agora) }
     catch { print("RESULTADO: FALHOU (\(error))"); exit(1) }
+    print("\(fotos.count) fotos de movimento nas últimas \(Int(horas)) h")
+    if let pedido = opcoes.texto("--foto") {
+        let indice = pedido == "ultimo" ? fotos.count - 1 : (Int(pedido) ?? -1)
+        guard fotos.indices.contains(indice) else { fputs("não há a foto \(pedido)\n", stderr); exit(2) }
+        let inicio = Date()
+        do {
+            let jpeg = try cartao.baixarFoto(fotos[indice])
+            let destino = URL(fileURLWithPath: opcoes.texto("--saida") ?? FileManager.default.temporaryDirectory.appendingPathComponent("foto.jpg").path)
+            try jpeg.write(to: destino)
+            print(String(format: "foto: %d bytes em %.2f s → %@", jpeg.count, Date().timeIntervalSince(inicio), destino.path))
+            print("RESULTADO: OK")
+            return
+        } catch { print("RESULTADO: FALHOU (\(error))"); exit(1) }
+    }
     let hora = DateFormatter()
     hora.dateFormat = "dd/MM HH:mm:ss"
     print("\(lista.count) gravações nas últimas \(Int(horas)) h")
