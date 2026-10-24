@@ -35,6 +35,15 @@ extension ModeloDoApp {
             Depuracao.registrar("janela minimizada")
             m.pausarDepois(segundos: 1)
         }
+        // Fechar a última janela não encerra o app (a gravação por movimento segue), mas ninguém
+        // mais vê o vídeo. Fechar uma folha (ajuda, ajustes) não conta: a janela dela segue aberta.
+        // Ao clicar no Dock, a janela nova volta a ficar visível e a oclusão retoma as sessões.
+        quando(nc, NSWindow.willCloseNotification) { m, n in
+            guard let w = n.object as? NSWindow, w.canBecomeMain else { return }
+            let outra = NSApp.windows.contains { $0 !== w && $0.canBecomeMain && $0.isVisible && !$0.isMiniaturized }
+            Depuracao.registrar("janela fechada\(outra ? " (outra segue aberta)" : "")")
+            if !outra { m.pausar() }
+        }
         quando(nc, NSWindow.didDeminiaturizeNotification) { m, _ in
             Depuracao.registrar("janela restaurada")
             m.retomarDepois(segundos: 0)
