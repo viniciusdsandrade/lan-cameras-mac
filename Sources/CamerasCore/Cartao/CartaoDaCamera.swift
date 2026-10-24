@@ -111,8 +111,9 @@ extension DVRIPClient {
         throw DVRIPErro("\(nome) veio num formato inesperado")
     }
 
-    /// Os arquivos de vídeo do cartão entre duas datas ("aaaa-MM-dd HH:mm:ss"), de todas as páginas.
-    func buscarArquivos(de inicio: String, ate fim: String) throws -> [[String: Any]] {
+    /// Os arquivos do cartão entre duas datas ("aaaa-MM-dd HH:mm:ss"), de todas as páginas: os vídeos
+    /// (`tipo` "h264", também os H.265) ou as fotos que a câmera tira no instante do movimento ("jpg").
+    func buscarArquivos(de inicio: String, ate fim: String, tipo: String = "h264") throws -> [[String: Any]] {
         var todos: [[String: Any]] = []
         var vistos: Set<String> = []
         var desde = inicio
@@ -120,7 +121,7 @@ extension DVRIPClient {
             let r = try pedir(Self.msgBuscarArquivos, [
                 "Name": "OPFileQuery", "SessionID": sessaoTexto,
                 "OPFileQuery": ["BeginTime": desde, "EndTime": fim, "Channel": 0, "DriverTypeMask": "0x0000FFFF",
-                                "Event": "*", "StreamType": "0x00000000", "Type": "h264"]])
+                                "Event": "*", "StreamType": "0x00000000", "Type": tipo]])
             let pagina = r["OPFileQuery"] as? [[String: Any]] ?? []
             if pagina.isEmpty, let ret = Self.ret(r), !Self.retornosOK.contains(ret), todos.isEmpty {
                 throw DVRIPErro("a câmera não deixou procurar as gravações (Ret=\(ret))")
@@ -135,9 +136,11 @@ extension DVRIPClient {
     }
 
     /// Baixa um arquivo do cartão. A câmera manda os dados em pedaços (mensagem 1426) sem avisar o
-    /// fim: `bytes` é o tamanho anunciado na busca; se ela parar antes, fica com o que veio.
-    /// `progresso` recebe os bytes já recebidos; devolver false cancela.
+    /// fim: `bytes` é o tamanho anunciado na busca (arredondado para cima, em KB); `completo` diz se
+    /// o que chegou já basta (uma foto termina antes desse tamanho); se ela parar antes, fica com o
+    /// que veio. `progresso` recebe os bytes já recebidos; devolver false cancela.
     func baixarArquivo(_ caminho: String, inicio: String, fim: String, bytes: Int,
+                       completo: ([UInt8]) -> Bool = { _ in false },
                        progresso: (Int) -> Bool) throws -> [UInt8] {
         let parametros: [String: Any] = ["PlayMode": "ByName", "FileName": caminho, "StreamType": 0, "Value": 0, "TransMode": "TCP"]
         func pedido(_ acao: String) -> [String: Any] {
@@ -152,7 +155,7 @@ extension DVRIPClient {
         defer { try? enviarQuadro(Self.msgReproducao, try Self.jsonComTerminador(pedido("DownloadStop"))) }
         var dados: [UInt8] = []
         dados.reserveCapacity(bytes)
-        while dados.count < bytes {
+        while dados.count < bytes, !completo(dados) {
             let quadro: (id: Int, corpo: [UInt8])
             do { quadro = try receberQuadro(timeout: dados.isEmpty ? nil : 3) }
             catch { if dados.isEmpty { throw error } else { break } }
@@ -242,13 +245,34 @@ public final class CartaoDaCamera: Sendable {
 
     /// As gravações que começam entre `inicio` e `fim`, da mais antiga para a mais nova.
     public func gravacoes(de inicio: Date, ate fim: Date) throws -> [GravacaoDoCartao] {
+        try eventos(de: inicio, ate: fim).videos
+    }
+
+    /// Os vídeos e as fotos (a câmera tira uma no instante do movimento) que começam entre `inicio` e
+    /// `fim`, dos mais antigos para os mais novos, numa conexão só.
+    public func eventos(de inicio: Date, ate fim: Date, comFotos: Bool = true) throws -> (videos: [GravacaoDoCartao], fotos: [GravacaoDoCartao]) {
         let f = Self.formatoDeData(fuso)
         let fuso = self.fuso
+        let de = f.string(from: inicio), ate = f.string(from: fim)
         return try comDVRIP { d in
-            try d.buscarArquivos(de: f.string(from: inicio), ate: f.string(from: fim))
-                .compactMap { GravacaoDoCartao($0, fuso: fuso) }
-                .sorted { $0.inicio < $1.inicio }
+            func ler(_ tipo: String) throws -> [GravacaoDoCartao] {
+                try d.buscarArquivos(de: de, ate: ate, tipo: tipo).compactMap { GravacaoDoCartao($0, fuso: fuso) }.sorted { $0.inicio < $1.inicio }
+            }
+            let videos = try ler("h264")
+            // sem fotos as miniaturas ficam neutras: não é motivo para esconder os vídeos
+            let fotos = comFotos ? ((try? ler("jpg")) ?? []) : []
+            return (videos, fotos)
         }
+    }
+
+    /// Baixa uma foto do cartão e devolve o JPEG (sem o cabeçalho da câmera).
+    public func baixarFoto(_ foto: GravacaoDoCartao) throws -> Data {
+        let bytes = try comDVRIP { d in
+            try d.baixarArquivo(foto.caminho, inicio: foto.textoDoInicio, fim: foto.textoDoFim, bytes: foto.bytes,
+                                completo: { ConteinerXM.foto($0) != nil }, progresso: { _ in true })
+        }
+        guard let jpeg = ConteinerXM.foto(bytes) else { throw DVRIPErro("a foto veio num formato inesperado") }
+        return Data(jpeg)
     }
 
     /// Baixa uma gravação como está no cartão (o contêiner da câmera; `ConversorDoCartao` faz o MP4).

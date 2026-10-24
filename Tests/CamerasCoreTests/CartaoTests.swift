@@ -113,9 +113,25 @@ final class CartaoDaCameraTests: XCTestCase {
         }
     }
 
+    /// Uma foto como a câmera manda: o quadro FE (16 bytes de cabeçalho) e um "JPEG" de 1000 bytes.
+    static let jpeg: [UInt8] = [0xFF, 0xD8] + [UInt8](repeating: 0x42, count: 996) + [0xFF, 0xD9]
+    static var fotoNoCartao: [UInt8] {
+        [0, 0, 1, 0xFE, 2, 0x40, 0, 0, 0, 0, 0x42, 0x68] + (0..<4).map { UInt8((jpeg.count >> (8 * $0)) & 0xFF) } + jpeg
+    }
+    /// Três fotos, uma em cada um dos três primeiros vídeos (anunciadas com 2 KB: a câmera arredonda para cima).
+    private static var fotos: [[String: Any]] {
+        (0..<3).map { k in
+            let hora = String(format: "01:%02d:05", k)
+            return ["BeginTime": "2026-10-24 \(hora)", "EndTime": "2026-10-24 \(hora)", "FileLength": "0x00000002",
+                    "FileName": "/idea0/2026-10-24/001/\(hora.replacingOccurrences(of: ":", with: "."))[M][@1a2b][0].jpg"]
+        }
+    }
+
     private func servidor(estado: [String: Any] = [:], arquivo: [UInt8] = [], disco: [[String: Any]]? = nil) throws -> ServidorDVRIPFalso {
         // dicionários de JSON não são Sendable; o servidor só os lê
         nonisolated(unsafe) let todos = Self.arquivos
+        nonisolated(unsafe) let fotos = Self.fotos
+        let foto = Self.fotoNoCartao
         let pedacos: [[UInt8]] = stride(from: 0, to: arquivo.count, by: 1000).map { Array(arquivo[$0..<min($0 + 1000, arquivo.count)]) }
         nonisolated(unsafe) let configs: [String: Any] = [
             "Detect.MotionDetect": [["Enable": true, "Level": 3, "EventHandler": ["RecordEnable": true, "RecordLatch": 10]]],
@@ -136,15 +152,19 @@ final class CartaoDaCameraTests: XCTestCase {
                 return ["Ret": 100, "Name": nome, nome: v]
             case 1440:
                 // como a câmera: a página começa no horário pedido (inclusive) e tem até 64 arquivos
-                let desde = (corpo["OPFileQuery"] as? [String: Any])?["BeginTime"] as? String ?? ""
-                let pagina = Array(todos.filter { ($0["BeginTime"] as! String) >= desde }.prefix(64))
+                let busca = corpo["OPFileQuery"] as? [String: Any] ?? [:]
+                let desde = busca["BeginTime"] as? String ?? ""
+                let lista = busca["Type"] as? String == "jpg" ? fotos : todos
+                let pagina = Array(lista.filter { ($0["BeginTime"] as! String) >= desde }.prefix(64))
                 return ["Ret": 100, "Name": "OPFileQuery", "OPFileQuery": pagina]
             case 1424: return ["Ret": 100, "Name": "OPPlayBack"]
             default: return nil                               // o DownloadStart não tem resposta: só os dados
             }
         }, extras: { id, corpo in
-            guard id == 1420, (corpo["OPPlayBack"] as? [String: Any])?["Action"] as? String == "DownloadStart" else { return [] }
-            return pedacos.map { (1426, $0) }
+            let reproducao = corpo["OPPlayBack"] as? [String: Any] ?? [:]
+            guard id == 1420, reproducao["Action"] as? String == "DownloadStart" else { return [] }
+            let nome = (reproducao["Parameter"] as? [String: Any])?["FileName"] as? String ?? ""
+            return nome.hasSuffix(".jpg") ? [(1426, Array(foto.prefix(600))), (1426, Array(foto.dropFirst(600)))] : pedacos.map { (1426, $0) }
         })
     }
 
@@ -213,6 +233,31 @@ final class CartaoDaCameraTests: XCTestCase {
         let reproducao = try XCTUnwrap(json["OPPlayBack"] as? [String: Any])
         XCTAssertEqual(reproducao["StartTime"] as? String, "2026-10-24 01:00:00", "as datas voltam como a câmera mandou")
         XCTAssertEqual((reproducao["Parameter"] as? [String: Any])?["FileName"] as? String, g.caminho)
+    }
+
+    func testFotosVemNaMesmaConexaoQueOsVideos() throws {
+        let s = try servidor()
+        let r = try cartao(s).eventos(de: data("2026-10-24 00:00:00"), ate: data("2026-10-24 06:00:00"))
+        XCTAssertEqual(r.videos.count, 70)
+        XCTAssertEqual(r.fotos.map(\.inicio), [data("2026-10-24 01:00:05"), data("2026-10-24 01:01:05"), data("2026-10-24 01:02:05")])
+        XCTAssertEqual(s.quadros.filter { $0.id == 1000 }.count, 1, "um login só para as duas buscas")
+    }
+
+    func testBaixarFotoParaNoTamanhoDoCabecalhoSemEsperarOArredondamento() throws {
+        let c = cartao(try servidor())
+        let foto = try XCTUnwrap(try c.eventos(de: data("2026-10-24 00:00:00"), ate: data("2026-10-24 06:00:00")).fotos.first)
+        XCTAssertEqual(foto.bytes, 2048, "anunciada com 2 KB")
+        let inicio = Date()
+        let jpeg = try c.baixarFoto(foto)
+        XCTAssertEqual([UInt8](jpeg), Self.jpeg, "só o JPEG, sem o cabeçalho da câmera")
+        XCTAssertLessThan(Date().timeIntervalSince(inicio), 1, "não espera os bytes do arredondamento, que a câmera não manda")
+    }
+
+    func testFotoDoCartaoSoValeInteira() {
+        let inteira = Self.fotoNoCartao
+        XCTAssertEqual(ConteinerXM.foto(inteira).map(Array.init), Self.jpeg)
+        XCTAssertNil(ConteinerXM.foto(Array(inteira.dropLast())), "ainda falta o último byte")
+        XCTAssertNil(ConteinerXM.foto([0, 0, 1, 0xFC] + inteira.dropFirst(4)), "um quadro de vídeo não é foto")
     }
 
     func testCancelarOBaixarPara() throws {

@@ -10,6 +10,7 @@ import CoreMedia
 /// | FD | 8 bytes: tamanho | os outros quadros |
 /// | FA | 8 bytes: codificação (14 = G.711 A-law), taxa (2 = 8 kHz), tamanho em 2 bytes | som |
 /// | F9 | 8 bytes: tipo, tamanho em 2 bytes | informações (ignoradas) |
+/// | FE | 16 bytes, como os do FC | uma foto em JPEG (os arquivos "jpg" do cartão) |
 ///
 /// Os números são little-endian e o vídeo vem em Annex B (NALs com prefixo de início). O fim do
 /// arquivo é completado com 00 ou FF até um múltiplo de 1 KB.
@@ -76,6 +77,15 @@ enum ConteinerXM {
         }
         lido.codec = codec(lido.itens, tipo: tipoDoVideo)
         return lido
+    }
+
+    /// O JPEG de uma foto do cartão, quando ela já chegou inteira: um quadro FE com o cabeçalho de
+    /// 16 bytes do FC (o tamanho nos bytes 12 a 15) e o JPEG logo depois.
+    static func foto(_ b: [UInt8]) -> ArraySlice<UInt8>? {
+        guard b.count >= 16, b[0] == 0, b[1] == 0, b[2] == 1, b[3] == 0xFE else { return nil }
+        let tamanho = le32(b, 12)
+        guard tamanho > 0, b.count >= 16 + tamanho else { return nil }
+        return b[16..<(16 + tamanho)]
     }
 
     private static func le32(_ b: [UInt8], _ i: Int) -> Int {
