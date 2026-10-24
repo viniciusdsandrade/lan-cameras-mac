@@ -78,6 +78,12 @@ public enum Plataforma {
         #endif
     }
 
+    /// Onde ficam as gravações do cartão das câmeras já convertidas (o sistema pode apagar se faltar espaço).
+    public static var pastaDeCacheDoCartao: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Câmeras de Casa/Cartão", isDirectory: true)
+    }
+
     /// "Filmes > Câmeras de Casa": nas mensagens.
     public static var ondeFicamAsGravacoes: String {
         #if os(iOS)

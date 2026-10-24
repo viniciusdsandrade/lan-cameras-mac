@@ -29,6 +29,8 @@ public final class ModeloDoApp: ObservableObject {
     public let armazenamento: ArmazenamentoDeCameras
     /// Gravação por movimento: segue com a janela escondida, ao contrário das sessões da tela.
     public let gravacao: GravacaoPorMovimento
+    /// O que as câmeras gravaram sozinhas no cartão de memória.
+    public let cartoes: CartoesDasCameras
     /// Sessões soltas porque ninguém está vendo (janela escondida, app em segundo plano, aparelho dormindo).
     private(set) var pausado = false
     var observadores: [NSObjectProtocol] = []
@@ -41,18 +43,24 @@ public final class ModeloDoApp: ObservableObject {
     /// `argumentos`: `--abrir NOME`, `--qualidade leve|hd`, `--zoom N` abrem direto num estado (útil em testes).
     /// `reidentificar`: como pegar de novo os dados de uma câmera que recusou a senha ou parou de
     /// responder (os testes trocam). `pastaDeGravacoes` e `agora`: onde a gravação por movimento
-    /// guarda os arquivos e que horas são para ela (os testes trocam).
+    /// guarda os arquivos e que horas são para ela (os testes trocam). `fonteDoCartao` e
+    /// `pastaDeCacheDoCartao`: de onde vêm as gravações do cartão das câmeras e onde ficam convertidas.
     public init(armazenamento: ArmazenamentoDeCameras = ArmazenamentoDeCameras(),
                 argumentos: [String] = ProcessInfo.processInfo.arguments,
                 observarCicloDeVida: Bool = true,
                 reidentificar: @escaping @Sendable (CameraConfig) throws -> CameraConfig = { try Cadastro.reidentificar($0) },
                 pastaDeGravacoes: URL = Plataforma.pastaDeGravacoes,
-                agora: @escaping () -> Date = Date.init) {
+                agora: @escaping () -> Date = Date.init,
+                fonteDoCartao: CartoesDasCameras.Fonte = .cameras,
+                pastaDeCacheDoCartao: URL = Plataforma.pastaDeCacheDoCartao) {
         self.armazenamento = armazenamento
         self.argumentos = argumentos
         self.reidentificar = reidentificar
         gravacao = GravacaoPorMovimento(armazenamento: armazenamento, pasta: pastaDeGravacoes, agora: agora)
+        cartoes = CartoesDasCameras(fonte: fonteDoCartao, pastaDeCache: pastaDeCacheDoCartao,
+                                    pastaDeGravacoes: pastaDeGravacoes, agora: agora)
         gravacao.modelo = self
+        cartoes.modelo = self
         recarregarCameras()
         aplicarArgumentos()
         ajustarSessoes()
