@@ -133,6 +133,14 @@ E para ver o que uma câmera gravou no cartão (e baixar uma gravação como MP4
 swift run camspike cartao --camera NOME --horas 12 --baixar ultimo --saida gravacao.mp4
 ```
 
+Para ver e testar as telas de gravações sem câmeras de verdade (e sem a imagem de nenhuma casa),
+há três câmeras de mentira que respondem como as XiongMai, com movimentos, fotos e vídeo
+sintéticos; o script diz como abrir o app do Mac e o do iPhone com elas:
+
+```sh
+python3 scripts/camera-falsa.py
+```
+
 ## Privacidade
 
 O app guarda as credenciais das câmeras só no Mac de quem o usa, em
