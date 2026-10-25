@@ -151,6 +151,153 @@ final class FluxoDeVideoTests: XCTestCase {
         XCTAssertTrue(mensagem.hasPrefix("não consegui conectar"), mensagem)
     }
 
+    // MARK: - Câmera travada (aceita a conexão e não responde)
+
+    /// O que uma travada de câmera faz com o app: o TCP funciona, o RTSP não responde a nada.
+    private func servidorTravado(conexoesMudas: Int) throws -> ServidorRTSPFalso {
+        let pacotes = Empacotador.h264(try Amostras.quadros(h265: false))
+        let servidor = try ServidorRTSPFalso(sdp: try sdp(h265: false), pacotesDeVideo: pacotes,
+                                             mudoNasPrimeirasConexoes: conexoesMudas)
+        servidor.iniciar()
+        return servidor
+    }
+
+    func testCameraQueNaoRespondeViraErroLogoEOClienteLargaAConexaoComRST() throws {
+        let servidor = try servidorTravado(conexoesMudas: 1)
+        let cliente = try XCTUnwrap(RTSPClient(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo"))
+        cliente.esperaPorResposta = 0.4
+        let inicio = Date()
+        XCTAssertThrowsError(try cliente.executar(incluirAudio: false, aoFicarPronto: { _ in }, aoReceberVideo: { _ in })) { erro in
+            let rtsp = erro as? RTSPErro
+            XCTAssertEqual(rtsp?.semResposta, true, "\(erro)")
+            XCTAssertEqual(rtsp?.credenciaisRecusadas, false)
+            XCTAssertEqual(rtsp?.descricao, "a câmera está na rede, mas não responde (travada?)")
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(inicio), 1.5, "esperou mais do que o combinado")
+        // um FIN deixaria o pedido que a câmera não leu na fila dela: o RST o apaga
+        XCTAssertTrue(esperar(ate: 2) { servidor.derrubadas == 1 }, "a conexão deveria ser derrubada, não fechada")
+    }
+
+    func testCameraTravadaMostraOErroSemPiscarEVoltaSozinhaNoRitmoCurto() throws {
+        let servidor = try servidorTravado(conexoesMudas: 2)
+        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo", esperaPorResposta: 0.3, falhasAteAvisar: 2)
+        let estados = Estados()
+        let avisos = Lista<Bool>()
+        fluxo.aoMudarEstado = { estados.registrar($0) }
+        fluxo.aoNaoResponder = { avisos.registrar($0) }
+        let inicio = Date()
+        fluxo.iniciar()
+        defer { fluxo.parar() }
+
+        XCTAssertTrue(esperar(ate: 15) { servidor.conexoes >= 3 && fluxo.quadrosRecebidos >= 20 },
+                      "conexões: \(servidor.conexoes), quadros: \(fluxo.quadrosRecebidos)")
+        // cada tentativa muda dura 0,3 s e a pausa é de 2 s: com a espera crescente de antes (2, 4 s) seriam 8 s
+        XCTAssertLessThan(Date().timeIntervalSince(inicio), 7, "a pausa entre as tentativas da câmera muda é fixa e curta")
+        let texto = "a câmera está na rede, mas não responde (travada?). Tentando de novo…"
+        let lista = estados.lista
+        XCTAssertEqual(lista.first, .conectando)
+        XCTAssertEqual(lista.filter { $0 == .conectando }.count, 1, "o erro fica na tela entre as tentativas: \(lista)")
+        XCTAssertEqual(lista.filter { $0 == .erro(texto) }.count, 1, "um erro só, não um por tentativa: \(lista)")
+        guard case .aoVivo = try XCTUnwrap(lista.last) else { return XCTFail("deveria terminar ao vivo: \(lista)") }
+        XCTAssertEqual(avisos.itens, [true], "avisa que não responde uma vez, depois de duas conexões sem imagem")
+    }
+
+    func testTimeoutNoPlayDevolveASessaoAntesDeDerrubarAConexao() throws {
+        // a sessão já existe na câmera (o SETUP deu certo): derrubar a conexão sem avisar a deixaria presa nela
+        let pacotes = Empacotador.h264(try Amostras.quadros(h265: false))
+        let servidor = try ServidorRTSPFalso(sdp: try sdp(h265: false), pacotesDeVideo: pacotes, mudoNoPlay: true)
+        servidor.iniciar()
+        let cliente = try XCTUnwrap(RTSPClient(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo"))
+        cliente.esperaPorResposta = 0.4
+        XCTAssertThrowsError(try cliente.executar(incluirAudio: false, aoFicarPronto: { _ in }, aoReceberVideo: { _ in })) { erro in
+            XCTAssertEqual((erro as? RTSPErro)?.semResposta, true, "\(erro)")
+        }
+        XCTAssertTrue(esperar(ate: 3) { servidor.metodos.contains("TEARDOWN") }, "deveria pedir o TEARDOWN: \(servidor.metodos)")
+        XCTAssertTrue(esperar(ate: 3) { servidor.derrubadas == 1 }, "e só depois derrubar a conexão")
+    }
+
+    func testCameraMudaSabeQueEstaMudaEVoltaAFalsoQuandoChegaImagem() throws {
+        let servidor = try servidorTravado(conexoesMudas: 1)
+        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo", esperaPorResposta: 0.3)
+        let estados = Estados()
+        fluxo.aoMudarEstado = { estados.registrar($0) }
+        XCTAssertFalse(fluxo.cameraMuda)
+        fluxo.iniciar()
+        defer { fluxo.parar() }
+
+        XCTAssertTrue(esperar(ate: 5) { estados.viu { if case .erro = $0 { return true } else { return false } } })
+        XCTAssertTrue(fluxo.cameraMuda, "aceitou a conexão e não respondeu: quem usa outros caminhos deve esperar")
+        fluxo.tentarAgora()
+        XCTAssertTrue(esperar(ate: 5) { fluxo.quadrosRecebidos >= 20 })
+        XCTAssertFalse(fluxo.cameraMuda, "com imagem de volta, a câmera não está mais muda")
+    }
+
+    func testTerminadoSoDepoisQueASessaoFoiDevolvida() throws {
+        let servidor = try servidorTravado(conexoesMudas: 0)
+        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo")
+        XCTAssertTrue(fluxo.terminado, "nunca começou: não há sessão a devolver")
+        fluxo.iniciar()
+        XCTAssertFalse(fluxo.terminado, "a thread do fluxo está rodando")
+        XCTAssertTrue(esperar { fluxo.quadrosRecebidos >= 20 })
+        fluxo.parar(esperarAte: 3)
+        XCTAssertTrue(fluxo.terminado)
+    }
+
+    func testTentarAgoraFuraAPausaEntreAsTentativas() throws {
+        let servidor = try servidorTravado(conexoesMudas: 1)
+        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo", esperaPorResposta: 0.3)
+        let estados = Estados()
+        fluxo.aoMudarEstado = { estados.registrar($0) }
+        fluxo.iniciar()
+        defer { fluxo.parar() }
+
+        XCTAssertTrue(esperar(ate: 5) { estados.viu { if case .erro = $0 { return true } else { return false } } })
+        let pedido = Date()
+        fluxo.tentarAgora()                                   // sem isto a segunda tentativa só viria 2 s depois da falha
+        XCTAssertTrue(esperar(ate: 1.5) { servidor.conexoes >= 2 && fluxo.quadrosRecebidos >= 20 },
+                      "conexões: \(servidor.conexoes)")
+        XCTAssertLessThan(Date().timeIntervalSince(pedido), 1.5)
+    }
+
+    func testTentarAgoraNaoFazNadaComAImagemFluindo() throws {
+        let servidor = try servidorTravado(conexoesMudas: 0)
+        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo")
+        fluxo.iniciar()
+        defer { fluxo.parar() }
+        XCTAssertTrue(esperar { fluxo.quadrosRecebidos >= 20 })
+        fluxo.tentarAgora()
+        fluxo.tentarAgora()
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertEqual(servidor.conexoes, 1, "com imagem não há o que tentar de novo")
+    }
+
+    func testPararComEsperaSoVoltaDepoisDeDevolverASessaoNaCamera() throws {
+        let servidor = try servidorTravado(conexoesMudas: 0)
+        let fluxo = FluxoDeVideo(url: "rtsp://127.0.0.1:\(servidor.porta)/fluxo")
+        fluxo.iniciar()
+        XCTAssertTrue(esperar { fluxo.quadrosRecebidos >= 20 })
+        fluxo.parar(esperarAte: 3)
+        // sem polling: ao voltar, a câmera já recebeu o aviso e o fluxo já terminou (é o que o app faz ao fechar)
+        XCTAssertTrue(servidor.metodos.contains("TEARDOWN"))
+        XCTAssertEqual(fluxo.estado, .parado)
+    }
+
+    func testOTextoDaCameraMudaDizHaQuantoTempoEOQueFazer() {
+        let desde = Date(timeIntervalSince1970: 1_000_000)
+        let erro = RTSPErro(RTSPErro.textoSemResposta, semResposta: true)
+        func texto(_ s: Double) -> String { FluxoDeVideo.texto(do: erro, mudaDesde: desde, agora: desde.addingTimeInterval(s)) }
+
+        XCTAssertEqual(texto(5), "a câmera está na rede, mas não responde (travada?). Tentando de novo…")
+        XCTAssertEqual(texto(59), texto(5), "só muda de minuto em minuto: o estado não pisca")
+        XCTAssertEqual(texto(60), "a câmera está na rede, mas não responde há 1 min. Tentando de novo…")
+        XCTAssertFalse(texto(150).contains("tomada"), "antes de 3 min ainda é cedo para mexer na câmera")
+        XCTAssertEqual(texto(200), "a câmera está na rede, mas não responde há 3 min. Tentando de novo; "
+                       + "se continuar assim, desligue-a da tomada por 10 s.")
+        // os outros erros seguem como eram
+        XCTAssertEqual(FluxoDeVideo.texto(do: RTSPErro("a câmera não anunciou vídeo"), mudaDesde: desde), "a câmera não anunciou vídeo")
+        XCTAssertEqual(FluxoDeVideo.texto(do: erro, mudaDesde: nil), RTSPErro.textoSemResposta)
+    }
+
     // MARK: - Senha recusada
 
     func testCameraQueRecusaASenhaAvisaUmaVezENaoInsiste() throws {

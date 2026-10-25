@@ -152,4 +152,56 @@ final class DVRIPTests: XCTestCase {
         XCTAssertEqual(r, 1)
         XCTAssertEqual(s.quadros.first?.id, 1000)
     }
+
+    // MARK: - Como a conexão termina
+
+    /// Uma câmera que atende uma conexão: lê o login e, se `responde`, diz que recusou; depois conta como o
+    /// cliente largou a conexão (0 = despedida com FIN; -1 com ECONNRESET = derrubada com RST).
+    private func cameraDeUmaConexao(responde: Bool) throws -> (porta: UInt16, comoTerminou: () -> (lido: Int, erro: Int32)?) {
+        let (escuta, porta) = try abrirEscutaLocal()
+        let resultado = Lista<(Int, Int32)>()
+        let t = Thread {
+            let c = accept(escuta, nil, nil)
+            guard c >= 0 else { return }
+            var cab = [UInt8](repeating: 0, count: 20)
+            _ = cab.withUnsafeMutableBytes { recv(c, $0.baseAddress, 20, MSG_WAITALL) }
+            let tam = Int(cab[16]) | Int(cab[17]) << 8
+            var corpo = [UInt8](repeating: 0, count: max(tam, 1))
+            _ = corpo.withUnsafeMutableBytes { recv(c, $0.baseAddress, tam, MSG_WAITALL) }
+            if responde {
+                let json = Array(#"{"Ret":205}"#.utf8) + [0x0A, 0x00]
+                var h = [UInt8](repeating: 0, count: 20)
+                h[0] = 0xFF; h[14] = 0xE9; h[15] = 0x03                       // 1001, a resposta ao login
+                h[16] = UInt8(json.count)
+                _ = (h + json).withUnsafeBytes { send(c, $0.baseAddress, h.count + json.count, 0) }
+            }
+            var um: UInt8 = 0
+            let n = recv(c, &um, 1, 0)
+            resultado.registrar((n, n < 0 ? errno : 0))
+            close(c)
+            close(escuta)
+        }
+        t.start()
+        return (porta, { resultado.itens.first.map { (lido: $0.0, erro: $0.1) } })
+    }
+
+    func testCameraQueRecusaOPedidoSeDespedeComFINPoisElaEstavaAtendendo() throws {
+        let camera = try cameraDeUmaConexao(responde: true)
+        XCTAssertThrowsError(try DVRIPClient.executar(host: "127.0.0.1", porta: camera.porta, usuario: "fulano", hash: "x") { _ in 1 }) { erro in
+            XCTAssertEqual((erro as? DVRIPErro)?.deRede, false, "\(erro)")
+        }
+        XCTAssertTrue(esperar(ate: 3) { camera.comoTerminou() != nil })
+        XCTAssertEqual(camera.comoTerminou()?.lido, 0, "um erro de aplicação não é motivo para derrubar a conexão")
+    }
+
+    func testCameraQueNaoRespondeTemAConexaoDerrubadaComRST() throws {
+        let camera = try cameraDeUmaConexao(responde: false)
+        XCTAssertThrowsError(try DVRIPClient.executar(host: "127.0.0.1", porta: camera.porta, usuario: "fulano", hash: "x", timeout: 0.3) { _ in 1 }) { erro in
+            XCTAssertEqual((erro as? DVRIPErro)?.deRede, true, "\(erro)")
+            XCTAssertEqual((erro as? DVRIPErro)?.descricao, "a câmera não respondeu pelo DVRIP")
+        }
+        XCTAssertTrue(esperar(ate: 3) { camera.comoTerminou() != nil })
+        XCTAssertEqual(camera.comoTerminou()?.lido, -1)
+        XCTAssertEqual(camera.comoTerminou()?.erro, ECONNRESET, "sem resposta: o pedido não fica esperando na fila dela")
+    }
 }

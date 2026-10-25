@@ -19,20 +19,25 @@ enum HTTPSimples {
         let dados = Array(corpo.utf8)
         let cabecalho = "POST \(caminho) HTTP/1.1\r\nHost: \(host):\(porta)\r\nContent-Type: \(tipo)\r\n"
             + "Content-Length: \(dados.count)\r\nConnection: close\r\nUser-Agent: CamerasDeCasa\r\n\r\n"
-        try s.escrever(Array(cabecalho.utf8) + dados)
+        do {
+            try s.escrever(Array(cabecalho.utf8) + dados)
 
-        var buf: [UInt8] = []
-        let limite = Date().addingTimeInterval(timeout)
-        while true {
-            if let r = try interpretar(buf, fimDaConexao: false) { return r }
-            let restante = limite.timeIntervalSinceNow
-            if restante <= 0 { throw ErroDeRede.tempoEsgotado("resposta da câmera") }
-            do {
-                if let novos = try s.ler(maximo: 65536, timeout: min(1, restante)) { buf += novos }
-            } catch ErroDeRede.fechado {
-                if let r = try interpretar(buf, fimDaConexao: true) { return r }
-                throw ErroDeRede.fechado
+            var buf: [UInt8] = []
+            let limite = Date().addingTimeInterval(timeout)
+            while true {
+                if let r = try interpretar(buf, fimDaConexao: false) { return r }
+                let restante = limite.timeIntervalSinceNow
+                if restante <= 0 { throw ErroDeRede.tempoEsgotado("resposta da câmera") }
+                do {
+                    if let novos = try s.ler(maximo: 65536, timeout: min(1, restante)) { buf += novos }
+                } catch ErroDeRede.fechado {
+                    if let r = try interpretar(buf, fimDaConexao: true) { return r }
+                    throw ErroDeRede.fechado
+                }
             }
+        } catch {
+            s.abortar()                            // câmera que não atende: o pedido não fica esperando na fila dela
+            throw error
         }
     }
 

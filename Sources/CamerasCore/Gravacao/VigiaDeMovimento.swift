@@ -170,6 +170,11 @@ public final class VigiaDeMovimento: @unchecked Sendable {
         return terminando.wait(timeout: .now() + segundos) == .success
     }
 
+    /// Espera a sessão na câmera ser devolvida a ela (ao fechar o app), depois de `parar()`.
+    public func esperarConexao(ate segundos: Double) {
+        fluxo.parar(esperarAte: segundos)
+    }
+
     // MARK: - Conexão
 
     /// Thread do RTSP, antes do primeiro pacote da conexão nova.

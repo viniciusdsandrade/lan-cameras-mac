@@ -26,13 +26,20 @@ final class ServidorRTSPFalso: @unchecked Sendable {
     private let audioIntercalado: Bool
     /// Pausa depois de cada quadro, em microssegundos: o vídeo chega num ritmo parecido com o real.
     private let pausaPorQuadro: useconds_t
+    /// As primeiras conexões caem numa câmera travada: o TCP aceita e lê, mas o programa não responde a
+    /// nada. Cada uma fica presa até o cliente largá-la (a conexão seguinte só é atendida depois).
+    private let mudoNasPrimeirasConexoes: Int
+    /// Trava no PLAY: responde ao resto, mas ao PLAY (já com a sessão aberta) não diz nada.
+    private let mudoNoPlay: Bool
     private let trava = NSLock()
     private var _metodos: [String] = []
     private var _conexoes = 0
+    private var _derrubadas = 0
 
     init(sdp: String, pacotesDeVideo: [[UInt8]], audioAntesDoPlay: [[UInt8]] = [],
          cortarPrimeiraConexaoApos: Int? = nil, calarPrimeiraConexaoApos: Int? = nil,
-         statusDoDescribe: Int = 200, audioIntercalado: Bool = false, pausaPorQuadro: useconds_t = 0) throws {
+         statusDoDescribe: Int = 200, audioIntercalado: Bool = false, pausaPorQuadro: useconds_t = 0,
+         mudoNasPrimeirasConexoes: Int = 0, mudoNoPlay: Bool = false) throws {
         self.sdp = sdp
         self.pacotesDeVideo = pacotesDeVideo
         self.audioAntesDoPlay = audioAntesDoPlay
@@ -41,6 +48,8 @@ final class ServidorRTSPFalso: @unchecked Sendable {
         self.statusDoDescribe = statusDoDescribe
         self.audioIntercalado = audioIntercalado
         self.pausaPorQuadro = pausaPorQuadro
+        self.mudoNasPrimeirasConexoes = mudoNasPrimeirasConexoes
+        self.mudoNoPlay = mudoNoPlay
 
         let s = socket(AF_INET, SOCK_STREAM, 0)
         guard s >= 0 else { throw Falha(motivo: "socket") }
@@ -66,6 +75,8 @@ final class ServidorRTSPFalso: @unchecked Sendable {
 
     var metodos: [String] { trava.withLock { _metodos } }
     var conexoes: Int { trava.withLock { _conexoes } }
+    /// Conexões presas (veja `mudoNasPrimeirasConexoes`) que o cliente largou com RST, não com FIN.
+    var derrubadas: Int { trava.withLock { _derrubadas } }
 
     func iniciar() {
         let t = Thread { [self] in servir() }
@@ -82,8 +93,22 @@ final class ServidorRTSPFalso: @unchecked Sendable {
             var um: Int32 = 1                                 // cliente que some no meio não derruba o teste
             setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &um, socklen_t(MemoryLayout<Int32>.size))
             let numero = trava.withLock { () -> Int in _conexoes += 1; return _conexoes }
-            atender(c, primeira: numero == 1)
+            if numero <= mudoNasPrimeirasConexoes { prender(c) } else { atender(c, primeira: numero == 1) }
             close(c)
+        }
+    }
+
+    /// Câmera travada: lê o que chega e não responde nada, até o cliente largar a conexão.
+    private func prender(_ c: Int32) {
+        var tmp = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let n = tmp.withUnsafeMutableBytes { recv(c, $0.baseAddress, 4096, 0) }
+            if n > 0 {
+                if String(decoding: tmp[0..<n], as: UTF8.self).hasPrefix("TEARDOWN") { trava.withLock { _metodos.append("TEARDOWN") } }
+                continue
+            }
+            if n < 0, errno == ECONNRESET { trava.withLock { _derrubadas += 1 } }
+            return
         }
     }
 
@@ -113,6 +138,9 @@ final class ServidorRTSPFalso: @unchecked Sendable {
                 setups += 1                                   // cada SETUP devolve outra sessão, como a câmera
                 enviar(c, resposta(cseq, ["Session: \(1000 + setups);timeout=60",
                                           "Transport: \(transporte);mode=PLAY"]))
+            case "PLAY" where mudoNoPlay:
+                prender(c)
+                return
             case "PLAY":
                 for p in audioAntesDoPlay { enviarQuadro(c, canal: 2, p) }
                 enviar(c, resposta(cseq, ["Session: \(1000 + setups)", "Range: npt=now-"]))

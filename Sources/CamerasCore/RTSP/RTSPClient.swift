@@ -4,12 +4,19 @@ public struct RTSPErro: Error, CustomStringConvertible, Sendable {
     public let descricao: String
     /// A câmera recusou o usuário e a senha da URL (401/403): com eles, tentar de novo não adianta.
     public let credenciaisRecusadas: Bool
+    /// A câmera aceitou a conexão, mas não respondeu a um pedido no tempo dado: o programa dela travou ou
+    /// está sobrecarregado. Isso passa sozinho em alguns minutos, sem a câmera reiniciar.
+    public let semResposta: Bool
     /// A mensagem passa por `Redact`: a URL das câmeras carrega usuário e senha.
-    public init(_ d: String, credenciaisRecusadas: Bool = false) {
+    public init(_ d: String, credenciaisRecusadas: Bool = false, semResposta: Bool = false) {
         descricao = Redact.texto(d)
         self.credenciaisRecusadas = credenciaisRecusadas
+        self.semResposta = semResposta
     }
     public var description: String { descricao }
+
+    /// O texto de uma câmera que aceita a conexão e não responde (é o que a tela mostra).
+    static let textoSemResposta = "a câmera está na rede, mas não responde (travada?)"
 }
 
 /// Cliente RTSP com RTP entrelaçado no próprio TCP (RFC 2326), feito para as
@@ -57,6 +64,11 @@ public final class RTSPClient: @unchecked Sendable {
     /// Segundos sem vídeo que contam como câmera travada.
     public var limiteSemVideo: TimeInterval = 8
 
+    /// Quanto cada resposta pode demorar. Uma câmera saudável responde em dezenas de milissegundos (o DESCRIBE
+    /// e o PLAY chegam a 1 s quando ela acaba de acordar); passar disso é a câmera travada, e esperar mais só
+    /// atrasa a próxima tentativa. O primeiro pedido, que não depende de nada, espera no máximo 4 s.
+    public var esperaPorResposta: TimeInterval = 6
+
     public init?(url: String) {
         guard let c = URLComponents(string: url),
               c.scheme?.lowercased() == "rtsp",
@@ -90,9 +102,20 @@ public final class RTSPClient: @unchecked Sendable {
         self.aoReceberAudio = aoReceberAudio
         let soquete = TCPSocket()
         try soquete.conectar(host: host, porta: porta, timeout: 5)
-        defer { soquete.fechar() }
+        var largar = false                                  // a câmera não atende: a conexão é derrubada (RST)
+        defer { if largar { soquete.abortar() } else { soquete.fechar() } }
+        do {
+            try conversar(incluirAudio: incluirAudio, aoFicarPronto: aoFicarPronto, soquete: soquete)
+        } catch let erro as RTSPErro {
+            if sessao != nil { liberarSessao(soquete, espera: 0.5) }     // já havia sessão na câmera: devolve antes de fechar
+            if erro.semResposta { largar = true }
+            throw erro
+        }
+    }
 
-        _ = try pedir("OPTIONS", url: url, soquete: soquete)          // algumas não respondem 200: tudo bem
+    private func conversar(incluirAudio: Bool, aoFicarPronto: (SDP) throws -> Void, soquete: TCPSocket) throws {
+        _ = try pedir("OPTIONS", url: url, soquete: soquete,         // algumas não respondem 200: tudo bem
+                      timeout: min(esperaPorResposta, 4))
         let descricao = try pedir("DESCRIBE", url: url, cabecalhos: [("Accept", "application/sdp")], soquete: soquete)
         guard descricao.status == 200 else { throw erroDeStatus("DESCRIBE", descricao.status) }
         let sdp = SDP.interpretar(descricao.corpo)
@@ -127,8 +150,23 @@ public final class RTSPClient: @unchecked Sendable {
                 ultimoKeepalive = agora
             }
         }
-        // Parada pedida: libera a sessão na câmera sem esperar resposta (há quadros no caminho).
-        try? enviar("TEARDOWN", url: url, soquete: soquete)
+        liberarSessao(soquete)                                  // parada pedida
+    }
+
+    /// Devolve a sessão à câmera: manda o TEARDOWN e espera, até `espera` s, ela responder ou fechar a
+    /// conexão (as XiongMai não respondem, só fecham). Largar a conexão antes disso as deixa com a sessão
+    /// aberta até notarem a conexão morta, e elas aguentam poucas. Há quadros de vídeo no caminho: são jogados fora.
+    private func liberarSessao(_ soquete: TCPSocket, espera: TimeInterval = 1) {
+        guard let meu = try? enviar("TEARDOWN", url: url, soquete: soquete) else { return }
+        let limite = Date().addingTimeInterval(espera)
+        while limite.timeIntervalSinceNow > 0 {
+            do {
+                if case .resposta(let r)? = try lerMensagem(timeout: min(0.2, limite.timeIntervalSinceNow), soquete: soquete),
+                   r.cseq == meu { return }
+            } catch {
+                return                                          // ela fechou a conexão: a sessão foi encerrada
+            }
+        }
     }
 
     private func configurarTrilha(_ midia: SDP.Midia, canal: Int, base: String?,
@@ -189,21 +227,24 @@ public final class RTSPClient: @unchecked Sendable {
         return (cseq, Array(req.utf8))
     }
 
+    /// Manda o pedido sem esperar a resposta. Devolve o `CSeq` dele, para reconhecer a resposta.
+    @discardableResult
     private func enviar(_ metodo: String, url: String, cabecalhos: [(String, String)] = [],
-                        soquete: TCPSocket) throws {
-        try soquete.escrever(montar(metodo, url: url, cabecalhos: cabecalhos).1)
+                        soquete: TCPSocket) throws -> Int {
+        let (meu, bytes) = montar(metodo, url: url, cabecalhos: cabecalhos)
+        try soquete.escrever(bytes)
+        return meu
     }
 
     @discardableResult
     private func pedir(_ metodo: String, url: String, cabecalhos: [(String, String)] = [],
-                       soquete: TCPSocket, timeout: TimeInterval = 8) throws -> Resposta {
-        let (meu, bytes) = montar(metodo, url: url, cabecalhos: cabecalhos)
-        try soquete.escrever(bytes)
-        let limite = Date().addingTimeInterval(timeout)
+                       soquete: TCPSocket, timeout: TimeInterval? = nil) throws -> Resposta {
+        let meu = try enviar(metodo, url: url, cabecalhos: cabecalhos, soquete: soquete)
+        let limite = Date().addingTimeInterval(timeout ?? esperaPorResposta)
         while true {
             if pararFoiPedido() { throw RTSPErro("interrompido") }
             let restante = limite.timeIntervalSinceNow
-            if restante <= 0 { throw RTSPErro("\(metodo): a câmera não respondeu em \(Int(timeout)) s") }
+            if restante <= 0 { throw RTSPErro(RTSPErro.textoSemResposta, semResposta: true) }
             guard let m = try lerMensagem(timeout: min(0.25, restante), soquete: soquete) else { continue }
             switch m {
             case .quadro(let c, let d): despachar(canal: c, dados: d)

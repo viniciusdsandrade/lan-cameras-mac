@@ -2,7 +2,12 @@ import Foundation
 
 public struct DVRIPErro: Error, CustomStringConvertible, Sendable {
     public let descricao: String
-    public init(_ d: String) { descricao = Redact.texto(d) }
+    /// A falha foi da conversa com a câmera (ela não respondeu, a conexão caiu), não de um pedido que ela recusou.
+    public let deRede: Bool
+    public init(_ d: String, deRede: Bool = false) {
+        descricao = Redact.texto(d)
+        self.deRede = deRede
+    }
     public var description: String { descricao }
 }
 
@@ -50,13 +55,18 @@ public final class DVRIPClient: @unchecked Sendable {
         let c = DVRIPClient(host: host, porta: porta, timeout: timeout)
         try c.conectar()
         defer { c.fechar() }
-        try c.entrar(usuario: usuario, hash: hash)
-        return try corpo(c)
+        do {
+            try c.entrar(usuario: usuario, hash: hash)
+            return try corpo(c)
+        } catch let erro as DVRIPErro where erro.deRede {
+            c.soquete.abortar()                    // câmera que não atende: o pedido não fica esperando na fila dela
+            throw erro
+        }
     }
 
     public func conectar() throws {
         do { try soquete.conectar(host: host, porta: porta, timeout: min(timeout, 5)) }
-        catch let e as ErroDeRede { throw DVRIPErro(e.description) }
+        catch let e as ErroDeRede { throw DVRIPErro(e.description, deRede: true) }
     }
 
     public func fechar() { soquete.fechar() }
@@ -80,7 +90,7 @@ public final class DVRIPClient: @unchecked Sendable {
         cab[15] = UInt8((id >> 8) & 0xFF)
         Self.gravar32(&cab, 16, UInt32(corpo.count))
         do { try soquete.escrever(cab + corpo) }
-        catch let e as ErroDeRede { throw DVRIPErro(e.description) }
+        catch let e as ErroDeRede { throw DVRIPErro(e.description, deRede: true) }
     }
 
     private static func gravar32(_ b: inout [UInt8], _ i: Int, _ v: UInt32) {
@@ -93,10 +103,10 @@ public final class DVRIPClient: @unchecked Sendable {
         let limite = Date().addingTimeInterval(timeout ?? self.timeout)
         while saida.count < n {
             let restante = limite.timeIntervalSinceNow
-            if restante <= 0 { throw DVRIPErro("a câmera não respondeu pelo DVRIP") }
+            if restante <= 0 { throw DVRIPErro("a câmera não respondeu pelo DVRIP", deRede: true) }
             do {
                 if let novos = try soquete.ler(maximo: n - saida.count, timeout: min(1, restante)) { saida += novos }
-            } catch let e as ErroDeRede { throw DVRIPErro(e.description) }
+            } catch let e as ErroDeRede { throw DVRIPErro(e.description, deRede: true) }
         }
         return saida
     }
@@ -223,6 +233,6 @@ public final class DVRIPClient: @unchecked Sendable {
     /// Descarta o que a câmera mandou sem ser pedido (não bloqueia).
     public func drenar() throws {
         do { while try soquete.ler(maximo: 4096, timeout: 0) != nil {} }
-        catch let e as ErroDeRede { throw DVRIPErro(e.description) }
+        catch let e as ErroDeRede { throw DVRIPErro(e.description, deRede: true) }
     }
 }

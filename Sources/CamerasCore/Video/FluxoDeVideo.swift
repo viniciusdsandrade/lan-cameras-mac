@@ -5,6 +5,11 @@ import Foundation
 /// recusar o usuário e a senha, não tenta de novo: avisa por `aoRecusarCredenciais`.
 /// Se várias conexões seguidas terminarem sem imagem, avisa por `aoNaoResponder` e segue tentando.
 ///
+/// Câmera que aceita a conexão e não responde (o programa dela travou, o que as XiongMai fazem por alguns
+/// minutos e depois passa sozinho) é tentada num ritmo curto e fixo, de 2 em 2 s: cada tentativa custa
+/// pouco, e assim o vídeo volta logo que ela volta. O erro segue na tela entre as tentativas, em vez de
+/// piscar "conectando…" a cada uma.
+///
 /// Cada instância ocupa UMA sessão RTSP na câmera (elas aguentam poucas);
 /// `parar()` libera a sessão. Os ouvintes são chamados de threads internas.
 public final class FluxoDeVideo: @unchecked Sendable {
@@ -37,14 +42,19 @@ public final class FluxoDeVideo: @unchecked Sendable {
     private let url: String
     private let incluirAudio: Bool
     private let limiteSemVideo: TimeInterval
+    private let esperaPorResposta: TimeInterval
     private let falhasAteAvisar: Int
     private let falhasEntreAvisos: Int
 
     private let trava = NSLock()
     private var rodando = false
+    private var esperando = false                           // o laço está na pausa entre duas tentativas
+    private var adiantar = false                            // `tentarAgora()` chegou fora da pausa: a próxima não espera
     private var cliente: RTSPClient?
     private let acordar = DispatchSemaphore(value: 0)
+    private let terminou = DispatchGroup()                  // a thread do laço, de `iniciar()` até o fim
 
+    private let _cameraMuda = Caixa<Bool>(false)
     private let _estado = Caixa<Estado>(.parado)
     private let _ultimoQuadro = Caixa<QuadroDecodificado?>(nil)
     private let _quadros = Caixa<Int>(0)
@@ -57,18 +67,23 @@ public final class FluxoDeVideo: @unchecked Sendable {
     private let _aoNaoResponder = Caixa<(@Sendable (Bool) -> Void)?>(nil)
 
     /// `limiteSemVideo`: segundos sem nenhum quadro de vídeo que contam como câmera travada (reconecta).
+    /// `esperaPorResposta`: quanto cada resposta da câmera pode demorar (veja `RTSPClient`).
     /// `falhasAteAvisar` e `falhasEntreAvisos`: quantas conexões seguidas sem imagem até `aoNaoResponder`
     /// e de quantas em quantas ele se repete enquanto durar (a 10 s por tentativa, uns 5 min).
     public init(url: String, incluirAudio: Bool = false, limiteSemVideo: TimeInterval = 8,
-                falhasAteAvisar: Int = 3, falhasEntreAvisos: Int = 30) {
+                esperaPorResposta: TimeInterval = 6, falhasAteAvisar: Int = 3, falhasEntreAvisos: Int = 30) {
         self.url = url
         self.incluirAudio = incluirAudio
         self.limiteSemVideo = limiteSemVideo
+        self.esperaPorResposta = esperaPorResposta
         self.falhasAteAvisar = max(1, falhasAteAvisar)
         self.falhasEntreAvisos = max(1, falhasEntreAvisos)
     }
 
     public var estado: Estado { _estado.valor }
+    /// A última conexão aceitou e a câmera não respondeu: o programa dela está travado. Quem fala com ela por
+    /// outros caminhos (estado, movimento) só a atrasa enquanto isso. Volta a ser falso quando chega imagem.
+    public var cameraMuda: Bool { _cameraMuda.valor }
     public var ultimoQuadro: QuadroDecodificado? { _ultimoQuadro.valor }
     public var quadrosRecebidos: Int { _quadros.valor }
 
@@ -114,7 +129,11 @@ public final class FluxoDeVideo: @unchecked Sendable {
         guard !rodando else { trava.unlock(); return }
         rodando = true
         trava.unlock()
-        let t = Thread { [self] in laco() }
+        terminou.enter()
+        let t = Thread { [self] in
+            defer { terminou.leave() }
+            laco()
+        }
         t.name = "fluxo-de-video"
         t.qualityOfService = .userInitiated
         t.start()
@@ -129,25 +148,53 @@ public final class FluxoDeVideo: @unchecked Sendable {
         acordar.signal()
     }
 
+    /// Como `parar()`, e espera (até `segundos`) a sessão ser devolvida à câmera. Ao fechar o app é o que
+    /// faz o TEARDOWN sair antes de o processo acabar: sem isso a câmera fica com a sessão até notar a queda.
+    public func parar(esperarAte segundos: TimeInterval) {
+        parar()
+        _ = terminou.wait(timeout: .now() + segundos)
+    }
+
+    /// A thread do fluxo já acabou (ou nunca começou): a sessão já foi devolvida à câmera.
+    public var terminado: Bool { terminou.wait(timeout: .now()) == .success }
+
+    /// Tenta de novo já, sem esperar o fim da pausa entre as tentativas (a pessoa pediu, a rede voltou). Se
+    /// ela cair no meio de uma tentativa, vale para a pausa que vier depois dela.
+    public func tentarAgora() {
+        let acordarAgora = trava.withLock { () -> Bool in
+            if !esperando { adiantar = true }
+            return esperando
+        }
+        if acordarAgora { acordar.signal() }
+    }
+
     private func estaRodando() -> Bool {
         trava.withLock { rodando }
     }
 
     private func mudar(_ novo: Estado) {
         guard _estado.valor != novo else { return }
+        if case .aoVivo = novo { _cameraMuda.valor = false }
         _estado.valor = novo
         _aoMudarEstado.valor?(novo)
     }
 
-    private enum Desfecho { case comQuadros, semQuadros, credenciaisRecusadas }
+    private enum Desfecho { case comQuadros, semQuadros, semResposta, credenciaisRecusadas }
+
+    /// Pausa entre as tentativas de uma câmera que aceita a conexão e não responde.
+    static let esperaComCameraMuda: TimeInterval = 2
 
     private func laco() {
         var espera = 1.0
         var falhas = 0                                     // conexões seguidas sem imagem
+        var mudaDesde: Date?                               // desde quando ela aceita a conexão e não responde
         while estaRodando() {
-            mudar(.conectando)
-            let desfecho = executarUmaSessao()
+            if falhas == 0 { mudar(.conectando) }          // nas tentativas seguintes o erro segue na tela
+            let (desfecho, erro) = executarUmaSessao()
             if !estaRodando() { break }
+            mudaDesde = desfecho == .semResposta ? (mudaDesde ?? Date()) : nil
+            _cameraMuda.valor = desfecho == .semResposta
+            if let erro { mudar(.erro(Self.texto(do: erro, mudaDesde: mudaDesde))) }
             if desfecho == .credenciaisRecusadas {
                 // Com a mesma senha a resposta seria a mesma, e insistir pode fazer a câmera bloquear
                 // a conta: o erro fica na tela até quem abriu o fluxo pará-lo (e abrir outro, com a nova).
@@ -158,29 +205,53 @@ public final class FluxoDeVideo: @unchecked Sendable {
             if desfecho == .comQuadros {
                 espera = 1
                 falhas = 0
+                trava.withLock { adiantar = false }        // o pedido era para a falha de antes, que já passou
             } else {
-                espera = min(espera * 2, 10)
+                espera = desfecho == .semResposta ? Self.esperaComCameraMuda : min(espera * 2, 10)
                 falhas += 1
                 if falhas >= falhasAteAvisar, (falhas - falhasAteAvisar) % falhasEntreAvisos == 0 {
                     _aoNaoResponder.valor?(falhas == falhasAteAvisar)
                 }
             }
-            _ = acordar.wait(timeout: .now() + espera)
+            while acordar.wait(timeout: .now()) == .success {}     // sinal velho (um `tentarAgora` fora da hora) não vale
+            let adiantada = trava.withLock { () -> Bool in
+                if adiantar { adiantar = false; return true }
+                esperando = true
+                return false
+            }
+            if !adiantada {
+                if estaRodando() { _ = acordar.wait(timeout: .now() + espera) }      // `parar()` já pode ter chegado
+                trava.withLock { esperando = false }
+            }
         }
         mudar(.parado)
     }
 
-    /// Roda uma conexão até ela terminar e diz como terminou.
-    private func executarUmaSessao() -> Desfecho {
+    /// O que a tela mostra de um erro. A câmera que não responde diz há quanto tempo, e depois de uns
+    /// minutos o que costuma resolver: a travada que passa sozinha dura de 1 a 10 minutos, e desligá-la da
+    /// tomada a faz voltar na hora.
+    static func texto(do erro: Error, mudaDesde: Date?, agora: Date = Date()) -> String {
+        guard let mudaDesde, (erro as? RTSPErro)?.semResposta == true else { return resumo(erro) }
+        let minutos = Int(agora.timeIntervalSince(mudaDesde) / 60)
+        switch minutos {
+        case ..<1: return "\(RTSPErro.textoSemResposta). Tentando de novo…"
+        case 1..<3: return "a câmera está na rede, mas não responde há \(minutos) min. Tentando de novo…"
+        default: return "a câmera está na rede, mas não responde há \(minutos) min. Tentando de novo; "
+            + "se continuar assim, desligue-a da tomada por 10 s."
+        }
+    }
+
+    /// Roda uma conexão até ela terminar e diz como terminou, com o erro que a encerrou (se houve).
+    private func executarUmaSessao() -> (desfecho: Desfecho, erro: Error?) {
         guard let cli = RTSPClient(url: url) else {
-            mudar(.erro("o endereço da câmera é inválido"))
-            return .semQuadros
+            return (.semQuadros, RTSPErro("o endereço da câmera é inválido"))
         }
         cli.limiteSemVideo = limiteSemVideo
+        cli.esperaPorResposta = esperaPorResposta
         trava.withLock { cliente = cli }
         _quadros.valor = 0
         let sessao = SessaoDeDecodificacao()
-        var recusou = false
+        var falha: Error?
         do {
             try cli.executar(
                 incluirAudio: incluirAudio,
@@ -192,12 +263,13 @@ public final class FluxoDeVideo: @unchecked Sendable {
                 aoReceberVideo: { [self] p in sessao.receber(p, aoUnidade: _aoReceberUnidade.valor) },
                 aoReceberAudio: { [self] p in _aoReceberAudio.valor?(p) })
         } catch {
-            if estaRodando() { mudar(.erro(Self.resumo(error))) }
-            recusou = (error as? RTSPErro)?.credenciaisRecusadas == true
+            falha = error
         }
         sessao.encerrar()
-        if recusou { return .credenciaisRecusadas }
-        return _quadros.valor > 0 ? .comQuadros : .semQuadros
+        let rtsp = falha as? RTSPErro
+        if rtsp?.credenciaisRecusadas == true { return (.credenciaisRecusadas, falha) }
+        if _quadros.valor > 0 { return (.comQuadros, falha) }
+        return (rtsp?.semResposta == true ? .semResposta : .semQuadros, falha)
     }
 
     private func quandoChegarQuadro(_ q: QuadroDecodificado) {

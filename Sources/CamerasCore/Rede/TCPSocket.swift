@@ -6,6 +6,8 @@ enum ErroDeRede: Error, CustomStringConvertible {
     case conexao(String)
     case tempoEsgotado(String)
     case fechado
+    /// O outro lado derrubou a conexão (RST) em vez de se despedir.
+    case reiniciada
     case sistema(String)
 
     var description: String {
@@ -14,6 +16,7 @@ enum ErroDeRede: Error, CustomStringConvertible {
         case .conexao(let m): return "não consegui conectar (\(m))"
         case .tempoEsgotado(let o): return "tempo esgotado: \(o)"
         case .fechado: return "conexão fechada"
+        case .reiniciada: return "conexão derrubada pela câmera"
         case .sistema(let m): return "erro de rede (\(m))"
         }
     }
@@ -103,6 +106,7 @@ final class TCPSocket: @unchecked Sendable {
         if lidos == 0 { throw ErroDeRede.fechado }
         if lidos < 0 {
             if errno == EAGAIN || errno == EINTR { return nil }
+            if errno == ECONNRESET { throw ErroDeRede.reiniciada }
             throw ErroDeRede.sistema(Self.texto(errno))
         }
         buf.removeSubrange(lidos...)
@@ -117,6 +121,7 @@ final class TCPSocket: @unchecked Sendable {
             let n = dados.withUnsafeBytes { send(s, $0.baseAddress! + enviados, dados.count - enviados, 0) }
             if n <= 0 {
                 if n < 0 && (errno == EINTR || errno == EAGAIN) { continue }
+                if n < 0 && (errno == EPIPE || errno == ECONNRESET) { throw ErroDeRede.reiniciada }
                 throw ErroDeRede.sistema(n < 0 ? Self.texto(errno) : "conexão fechada ao enviar")
             }
             enviados += n
@@ -135,5 +140,19 @@ final class TCPSocket: @unchecked Sendable {
         fd = -1
         trava.unlock()
         if s >= 0 { close(s) }
+    }
+
+    /// Fecha derrubando a conexão (RST) em vez de se despedir (FIN). É o jeito de largar uma conexão que a
+    /// câmera nunca atendeu: com FIN, o pedido que ela não leu segue sendo retransmitido e, se o programa dela
+    /// voltar, ela o atende (para ninguém) antes dos pedidos que valem; com RST, ele some da fila dela.
+    func abortar() {
+        trava.lock()
+        let s = fd
+        fd = -1
+        trava.unlock()
+        guard s >= 0 else { return }
+        var sem = linger(l_onoff: 1, l_linger: 0)
+        setsockopt(s, SOL_SOCKET, SO_LINGER, &sem, socklen_t(MemoryLayout<linger>.size))
+        close(s)
     }
 }

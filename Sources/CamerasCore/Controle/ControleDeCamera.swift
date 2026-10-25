@@ -52,7 +52,7 @@ public final class ControleDeCamera: Sendable {
                 e.rastreioVoltaEmSegundos = r.voltaEmSegundos
                 e.sinalDoWiFi = try? d.sinalDoWiFi()
             }
-        } catch { e.avisos.append("a câmera não respondeu pelo DVRIP (\(error))") }
+        } catch { e.avisos.append("não consegui ler luz, rastreio e Wi-Fi: \(error)") }
         do { e.presets = try onvif.presets() }
         catch { e.avisos.append("não consegui ler as posições salvas (\(error))") }
         return e
