@@ -43,9 +43,18 @@ do fabricante.
 
 ## Usar
 
+A janela é escura, como nos apps de câmeras, para o vídeo saltar e a tela não ofuscar à noite. À
+esquerda, a barra lateral: todas as câmeras, as gravações e cada câmera, com o estado do vídeo (● ao
+vivo, ◌ conectando, ⚠ sem imagem) e o selo REC quando o Mac grava; arrastar uma câmera muda a ordem
+(a do mosaico e dos atalhos). Todas as câmeras ficam num mosaico que cabe na janela sem rolar, com o
+nome embaixo de cada vídeo (o alto fica livre para a data que a câmera escreve na imagem) e a borda
+vermelha na que está gravando. Numa câmera aberta, a lente móvel fica grande e a fixa num quadro
+menor no canto; embaixo do vídeo, a barra com ouvir, falar, foto, zoom e luz; à direita, o painel
+de controles (movimento, posições salvas, luz e rastreio, sons), que se esconde para o vídeo crescer.
+
 | tecla | ação |
 | --- | --- |
-| ⌘0 | visão geral |
+| ⌘0 | todas as câmeras |
 | ⌘1 a ⌘9 | abre uma câmera |
 | setas | movem a câmera enquanto estiverem apertadas (duas juntas fazem diagonal) |
 | espaço | para o movimento |
@@ -55,6 +64,9 @@ do fabricante.
 | ⇧⌘P | foto da lente atual |
 | ⇧⌘R | gravações do cartão das câmeras |
 | ← → e espaço | nas gravações: movimento anterior e seguinte, tocar e pausar |
+| ⌃⌘S | mostra e esconde a barra lateral |
+| ⌃⌘I | mostra e esconde o painel de controles da câmera |
+| ⌘? | como usar |
 | ⌘, | ajustes (gravação no Mac) |
 
 Na imagem, rolar ou pinçar no trackpad aproxima no ponto do cursor, arrastar move a
