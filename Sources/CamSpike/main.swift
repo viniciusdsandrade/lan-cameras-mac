@@ -7,6 +7,7 @@ import CamerasCore
 //   camspike descobrir [--salvar] [--segundos N]
 //   camspike adicionar --ip ENDERECO [--salvar]
 //   camspike estado [--camera NOME]
+//   camspike sondar [--camera NOME] [--segundos N] [--intervalo S]
 //   camspike video --camera NOME [--stream principal|secundario] [--frames N] [--segundos S] [--saida PREFIXO]
 //   camspike ptz-medir --camera NOME [--direcao esquerda|direita|cima|baixo] [--velocidade V] [--ms N]
 //   camspike audio --camera NOME [--segundos N]
@@ -29,6 +30,7 @@ switch comando {
 case "descobrir": comandoDescobrir(opcoes)
 case "adicionar": comandoAdicionar(opcoes)
 case "estado": comandoEstado(opcoes)
+case "sondar": comandoSondar(opcoes)
 case "video": comandoVideo(opcoes)
 case "ptz-medir": comandoPtzMedir(opcoes)
 case "mover": comandoMover(opcoes)

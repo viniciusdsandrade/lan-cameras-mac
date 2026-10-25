@@ -9,6 +9,7 @@ func uso() -> Never {
       camspike descobrir [--salvar] [--segundos N]
       camspike adicionar --ip ENDERECO [--salvar]
       camspike estado [--camera NOME]
+      camspike sondar [--camera NOME] [--segundos N] [--intervalo S]
       camspike video --camera NOME [--stream principal|secundario] [--frames N] [--segundos S] [--saida PREFIXO]
       camspike ptz-medir --camera NOME [--direcao esquerda|direita|cima|baixo] [--velocidade V] [--ms N] [--sem-parar]
       camspike audio --camera NOME [--segundos N]
@@ -131,6 +132,36 @@ func comandoEstado(_ opcoes: Opcoes) {
     }
 }
 
+// MARK: - sondar (somente leitura, sem credenciais)
+
+/// Vê de leve se as câmeras estão atendendo e separa "sumiu" de "travou" (veja `SondaDeCamera`). Com
+/// `--segundos`, repete a cada `--intervalo` s (5 por padrão) e escreve uma linha por mudança, para ver
+/// quando uma câmera trava e quando volta.
+func comandoSondar(_ opcoes: Opcoes) {
+    let todas = (try? ArmazenamentoDeCameras().carregar()) ?? []
+    let alvo = opcoes.texto("--camera").map { _ in [cameraEscolhida(opcoes)] } ?? todas
+    if alvo.isEmpty { print("nenhuma câmera cadastrada (rode: camspike descobrir --salvar)"); exit(1) }
+    let duracao = opcoes.decimal("--segundos", padrao: 0)
+    let intervalo = max(1, opcoes.decimal("--intervalo", padrao: 5))
+    let formato = DateFormatter()
+    formato.dateFormat = "HH:mm:ss"
+    let fim = Date().addingTimeInterval(duracao)
+    var anterior: [String: String] = [:]
+    repeat {
+        for c in alvo {
+            let agora: String
+            switch SondaDeCamera.sondar(host: c.host) {
+            case .respondendo: agora = "respondendo"
+            case .travada: agora = "TRAVADA: aceita a conexão, mas o programa dela não responde"
+            case .semConexao(let motivo): agora = "sem conexão (\(motivo))"
+            }
+            if duracao == 0 || anterior[c.id] != agora { print("\(formato.string(from: Date())) \(c.nome): \(agora)") }
+            anterior[c.id] = agora
+        }
+        if Date() < fim { Thread.sleep(forTimeInterval: intervalo) }
+    } while Date() < fim
+}
+
 // MARK: - video
 
 final class Coletor: @unchecked Sendable {
@@ -183,7 +214,7 @@ func comandoVideo(_ opcoes: Opcoes) {
         Thread.sleep(forTimeInterval: 0.05)
     }
     let decorrido = Date().timeIntervalSince(inicio)
-    fluxo.parar()
+    fluxo.parar(esperarAte: 2)                   // devolve a sessão à câmera antes de sair
 
     let n = coletor.quadros
     print(String(format: "quadros decodificados: %d em %.1f s (%.1f quadros/s)", n, decorrido, Double(n) / max(decorrido, 0.001)))
@@ -259,7 +290,7 @@ func comandoPtzMedir(_ opcoes: Opcoes) {
     let fluxo = FluxoDeVideo(url: camera.urlDeVideo(.secundario))
     fluxo.aoReceberQuadro = { medidor.registrar($0) }
     fluxo.iniciar()
-    defer { fluxo.parar() }
+    defer { fluxo.parar(esperarAte: 2) }
 
     // espera o vídeo estabilizar e mede o ruído com a câmera parada
     let limite = Date().addingTimeInterval(15)
@@ -456,7 +487,7 @@ func comandoAudio(_ opcoes: Opcoes) {
     let fluxo = FluxoDeVideo(url: camera.urlDeVideo(.secundario), incluirAudio: true)
     fluxo.aoReceberAudio = { coletor.registrar($0) }
     fluxo.iniciar()
-    defer { fluxo.parar() }
+    defer { fluxo.parar(esperarAte: 2) }
     let inicio = Date()
     while fluxo.quadrosRecebidos < 1, Date().timeIntervalSince(inicio) < 15 { Thread.sleep(forTimeInterval: 0.05) }
     let t0 = Date()
@@ -560,6 +591,7 @@ func comandoVigiar(_ opcoes: Opcoes) {
     }
     vigia.parar()
     vigia.esperarArquivos(ate: 10)
+    vigia.esperarConexao(ate: 2)
     let r = analisador.resumo
     let feitas = gravacoes.lista
     print("quadros analisados: \(r.quadros), com movimento: \(r.comMovimento) (\(r.quadros > 0 ? 100 * r.comMovimento / r.quadros : 0)%)")
