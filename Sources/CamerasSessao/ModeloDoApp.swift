@@ -39,19 +39,22 @@ public final class ModeloDoApp: ObservableObject {
     private var pausaAgendada: Task<Void, Never>?
     private let argumentos: [String]
     private let reidentificar: @Sendable (CameraConfig) throws -> CameraConfig
+    private let sondar: @Sendable (String) -> SondaDeCamera.Resultado
     /// Câmeras cujas credenciais estão sendo pegas de novo (uma vez por câmera de cada vez).
     private var renovando: Set<String> = []
 
     /// `argumentos`: `--abrir NOME` (uma câmera, ou "gravações"), `--qualidade leve|hd`, `--zoom N` abrem
     /// direto num estado (útil em testes e capturas de tela).
     /// `reidentificar`: como pegar de novo os dados de uma câmera que recusou a senha ou parou de
-    /// responder (os testes trocam). `pastaDeGravacoes` e `agora`: onde a gravação por movimento
+    /// responder (os testes trocam). `sondar`: como saber se uma câmera que não responde está travada no
+    /// endereço dela (os testes trocam). `pastaDeGravacoes` e `agora`: onde a gravação por movimento
     /// guarda os arquivos e que horas são para ela (os testes trocam). `fonteDoCartao` e
     /// `pastaDeCacheDoCartao`: de onde vêm as gravações do cartão das câmeras e onde ficam convertidas.
     public init(armazenamento: ArmazenamentoDeCameras = ArmazenamentoDeCameras(),
                 argumentos: [String] = ProcessInfo.processInfo.arguments,
                 observarCicloDeVida: Bool = true,
                 reidentificar: @escaping @Sendable (CameraConfig) throws -> CameraConfig = { try Cadastro.reidentificar($0) },
+                sondar: @escaping @Sendable (String) -> SondaDeCamera.Resultado = { SondaDeCamera.sondar(host: $0) },
                 pastaDeGravacoes: URL = Plataforma.pastaDeGravacoes,
                 agora: @escaping () -> Date = Date.init,
                 fonteDoCartao: CartoesDasCameras.Fonte = .cameras,
@@ -59,6 +62,7 @@ public final class ModeloDoApp: ObservableObject {
         self.armazenamento = armazenamento
         self.argumentos = argumentos
         self.reidentificar = reidentificar
+        self.sondar = sondar
         gravacao = GravacaoPorMovimento(armazenamento: armazenamento, pasta: pastaDeGravacoes, agora: agora)
         cartoes = CartoesDasCameras(fonte: fonteDoCartao, pastaDeCache: pastaDeCacheDoCartao,
                                     pastaDeGravacoes: pastaDeGravacoes, agora: agora)
@@ -132,16 +136,38 @@ public final class ModeloDoApp: ObservableObject {
         }
     }
 
-    /// Libera todas as sessões (ninguém está vendo) sem perder a seleção.
-    public func pausar() {
+    /// Os vídeos abertos agora nas câmeras (a visão geral, ou a tela de uma câmera).
+    private var videosAbertos: [SessaoDeVideo] {
+        Array(sessoesGerais.values) + (sessaoDaCamera.map { [$0.video] } ?? [])
+    }
+
+    /// Vídeos já soltos cujo aviso à câmera ainda pode estar a caminho: a tela apaga um instante antes de o
+    /// Mac dormir, e quem pausou primeiro não esperou.
+    private var soltandoAinda: [SessaoDeVideo] = []
+
+    /// Libera todas as sessões (ninguém está vendo) sem perder a seleção. Com `esperando`, espera até esse
+    /// tanto de segundos as câmeras serem avisadas, também as soltas por uma pausa anterior: quando o Mac vai
+    /// dormir ou o app vai fechar, depois disso o aviso não sai, e a câmera fica com as sessões até notar a queda.
+    public func pausar(esperando segundos: TimeInterval = 0) {
         pausaAgendada?.cancel()
-        guard !pausado else { return }
-        Depuracao.registrar("pausar: soltando as sessões")
-        pausado = true
-        for s in sessoesGerais.values { s.parar() }
-        sessoesGerais = [:]
-        sessaoDaCamera?.encerrar()
-        sessaoDaCamera = nil
+        if !pausado {
+            Depuracao.registrar("pausar: soltando as sessões")
+            let soltas = videosAbertos
+            pausado = true
+            for s in sessoesGerais.values { s.parar() }
+            sessoesGerais = [:]
+            sessaoDaCamera?.encerrar()
+            sessaoDaCamera = nil
+            soltandoAinda = (soltandoAinda + soltas).filter { !$0.terminado }       // as que já avisaram a câmera saem
+        }
+        esperarAviso(ate: segundos)
+    }
+
+    private func esperarAviso(ate segundos: TimeInterval) {
+        guard segundos > 0 else { return }
+        let limite = Date().addingTimeInterval(segundos)
+        for v in soltandoAinda { v.pararEsperando(ate: max(0.05, limite.timeIntervalSinceNow)) }
+        soltandoAinda = []
     }
 
     public func retomar() {
@@ -165,6 +191,14 @@ public final class ModeloDoApp: ObservableObject {
             if segundos > 0 { try? await Task.sleep(for: .seconds(segundos)) }
             if !Task.isCancelled { retomar() }
         }
+    }
+
+    /// O app vai fechar: devolve as sessões às câmeras (as da gravação por movimento também) e espera o
+    /// aviso sair, em vez de deixar o sistema derrubar as conexões no meio do vídeo.
+    func encerrarTudo() {
+        pausar()                                   // as câmeras são avisadas enquanto os arquivos da gravação fecham
+        gravacao.encerrar()
+        esperarAviso(ate: 1.5)
     }
 
     public func recomecarSessaoDaCamera() {
@@ -289,10 +323,21 @@ public final class ModeloDoApp: ObservableObject {
         func informar(_ texto: String, _ tipo: Aviso.Tipo = .info) {
             if naTela { avisar(texto, tipo) } else { Depuracao.registrar(texto) }
         }
-        informar(senha ? "\(camera.nome) não aceitou a senha guardada: pegando a atual com a própria câmera…"
-                     : "\(camera.nome) não responde no endereço guardado: procurando na rede…")
-        let reidentificar = self.reidentificar
+        let reidentificar = self.reidentificar, sondar = self.sondar
+        if senha { informar("\(camera.nome) não aceitou a senha guardada: pegando a atual com a própria câmera…") }
         Task {
+            if !senha {
+                // Câmera que está no endereço certo e só travou (as XiongMai ficam minutos sem responder e
+                // voltam sozinhas) não se acha procurando na rede: o vídeo reconecta quando ela voltar.
+                let sonda = await Task.detached(priority: .userInitiated) { sondar(camera.host) }.value
+                if sonda == .travada {
+                    renovando.remove(camera.id)
+                    informar("\(camera.nome) está na rede, mas o programa dela travou e não responde. Isso costuma "
+                             + "passar sozinho em alguns minutos: o vídeo volta assim que ela voltar.", .erro)
+                    return
+                }
+                informar("\(camera.nome) não responde no endereço guardado: procurando na rede…")
+            }
             let r = await Task.detached(priority: .userInitiated) { Result { try reidentificar(camera) } }.value
             renovando.remove(camera.id)
             switch r {

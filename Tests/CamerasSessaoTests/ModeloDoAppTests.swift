@@ -21,11 +21,13 @@ final class ModeloDoAppTests: XCTestCase {
     }
 
     /// `reidentificar`: o que a câmera responde quando o app pede de novo os dados dela (por padrão,
-    /// que sumiu: os testes nunca saem procurando na rede de verdade).
+    /// que sumiu: os testes nunca saem procurando na rede de verdade). `sondar`: se ela está no endereço,
+    /// só travada (por padrão, que nem conecta: o caso em que o app a procura na rede).
     private func modelo(_ argumentos: [String] = [],
-                        reidentificar: @escaping @Sendable (CameraConfig) throws -> CameraConfig = { _ in throw Cadastro.Falha.cameraSumiu }) -> ModeloDoApp {
+                        reidentificar: @escaping @Sendable (CameraConfig) throws -> CameraConfig = { _ in throw Cadastro.Falha.cameraSumiu },
+                        sondar: @escaping @Sendable (String) -> SondaDeCamera.Resultado = { _ in .semConexao("sem rota") }) -> ModeloDoApp {
         ModeloDoApp(armazenamento: ArmazenamentoDeCameras(pasta: pasta), argumentos: argumentos, observarCicloDeVida: false,
-                    reidentificar: reidentificar, pastaDeGravacoes: pasta.appendingPathComponent("gravacoes"))
+                    reidentificar: reidentificar, sondar: sondar, pastaDeGravacoes: pasta.appendingPathComponent("gravacoes"))
     }
 
     /// Espera o que o modelo faz em segundo plano (as tarefas dele voltam para a thread principal).
@@ -200,6 +202,7 @@ final class ModeloDoAppTests: XCTestCase {
     func testCameraQueNaoRespondeEApareceEmOutroEnderecoReabreSoEla() async throws {
         // o roteador deu outro endereço à câmera, e o dela a outro aparelho
         let m = modelo(reidentificar: { c in
+            Thread.sleep(forTimeInterval: 0.3)               // a busca demora: o aviso dela fica na tela
             var nova = c
             nova.host = "192.0.2.40"
             return nova
@@ -207,7 +210,8 @@ final class ModeloDoAppTests: XCTestCase {
         let antes = m.sessoesGerais
         let primeira = try XCTUnwrap(antes["SERIE-FALSA-1"])
         primeira.aoNaoResponder?(true)                       // o que o fluxo faz depois de algumas conexões sem imagem
-        XCTAssertEqual(m.aviso?.texto, "Câmera 1 não responde no endereço guardado: procurando na rede…")
+        let procurando = await esperar { m.aviso?.texto == "Câmera 1 não responde no endereço guardado: procurando na rede…" }
+        XCTAssertTrue(procurando, "avisa que está procurando (depois de conferir que ela não está só travada): \(String(describing: m.aviso?.texto))")
         let achou = await esperar { m.camera(id: "SERIE-FALSA-1")?.host == "192.0.2.40" }
         XCTAssertTrue(achou)
         XCTAssertEqual(try ArmazenamentoDeCameras(pasta: pasta).carregar().map(\.host), ["192.0.2.40", "127.0.0.1", "127.0.0.1"],
@@ -248,6 +252,95 @@ final class ModeloDoAppTests: XCTestCase {
         XCTAssertEqual(m.aviso?.texto, "Câmera 2 responde no endereço guardado, mas não manda imagem. Continuo tentando.")
         XCTAssertTrue(m.sessoesGerais["SERIE-FALSA-2"] === antiga, "o fluxo dela segue tentando sozinho")
         m.pausar()
+    }
+
+    func testCameraTravadaNoEnderecoNaoEhProcuradaNaRedeEAvisaUmaVezSo() async throws {
+        // as XiongMai ficam minutos sem responder a nada e voltam sozinhas: ela está no endereço certo
+        let buscas = Contagem()
+        let sondas = Contagem()
+        let m = modelo(reidentificar: { _ in
+            buscas.somar()
+            throw Cadastro.Falha.cameraSumiu
+        }, sondar: { _ in
+            sondas.somar()
+            return .travada
+        })
+        let antiga = try XCTUnwrap(m.sessoesGerais["SERIE-FALSA-2"])
+        antiga.aoNaoResponder?(true)
+        let avisou = await esperar { m.aviso?.tipo == .erro }
+        XCTAssertTrue(avisou)
+        XCTAssertEqual(m.aviso?.texto, "Câmera 2 está na rede, mas o programa dela travou e não responde. Isso costuma "
+                       + "passar sozinho em alguns minutos: o vídeo volta assim que ela voltar.")
+        XCTAssertEqual(buscas.valor, 0, "procurar na rede por uma câmera que está no endereço só gasta a rede")
+        XCTAssertTrue(m.sessoesGerais["SERIE-FALSA-2"] === antiga, "o fluxo dela segue tentando sozinho")
+
+        m.aviso = nil
+        antiga.aoNaoResponder?(false)                        // o fluxo avisa de novo enquanto ela não volta
+        let sondouDeNovo = await esperar { sondas.valor == 2 }
+        XCTAssertTrue(sondouDeNovo, "cada aviso confere de novo: ela pode ter voltado ou sumido")
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertNil(m.aviso, "quem segue travada não enche a tela de avisos")
+        XCTAssertEqual(buscas.valor, 0)
+        m.pausar()
+    }
+
+    func testCameraQueRespondeNaSondaMasNaoMandaImagemAindaEhProcurada() async throws {
+        let buscas = Contagem()
+        let m = modelo(reidentificar: { c in
+            buscas.somar()
+            return c
+        }, sondar: { _ in .respondendo })
+        let s = try XCTUnwrap(m.sessoesGerais["SERIE-FALSA-1"])
+        s.aoNaoResponder?(true)
+        let avisou = await esperar { m.aviso?.tipo == .erro }
+        XCTAssertTrue(avisou)
+        XCTAssertEqual(buscas.valor, 1, "o programa dela responde, então o problema é outro: pega os dados dela de novo")
+        XCTAssertEqual(m.aviso?.texto, "Câmera 1 responde no endereço guardado, mas não manda imagem. Continuo tentando.")
+        m.pausar()
+    }
+
+    func testSenhaRecusadaNemSondaACamera() async throws {
+        let sondas = Contagem()
+        let m = modelo(reidentificar: { c in
+            var nova = c
+            nova.hash = "senha-nova"
+            return nova
+        }, sondar: { _ in
+            sondas.somar()
+            return .travada
+        })
+        let s = try XCTUnwrap(m.sessoesGerais["SERIE-FALSA-3"])
+        s.aoRecusarCredenciais?()                            // ela respondeu (401): não está travada
+        let renovou = await esperar { m.camera(id: "SERIE-FALSA-3")?.hash == "senha-nova" }
+        XCTAssertTrue(renovou)
+        XCTAssertEqual(sondas.valor, 0)
+        m.pausar()
+    }
+
+    func testEncerrarTudoSoltaAsSessoesEEsperaOAvisoSair() {
+        let m = modelo()
+        m.selecionar(.camera("SERIE-FALSA-2"))
+        let inicio = Date()
+        m.encerrarTudo()
+        XCTAssertTrue(m.pausado)
+        XCTAssertNil(m.sessaoDaCamera)
+        XCTAssertTrue(m.sessoesGerais.isEmpty)
+        XCTAssertLessThan(Date().timeIntervalSince(inicio), 2, "espera o aviso às câmeras, mas não trava o fechamento do app")
+
+        let outro = modelo()
+        outro.pausar(esperando: 1)                           // o que o app faz quando o Mac vai dormir
+        XCTAssertTrue(outro.pausado)
+        XCTAssertTrue(outro.sessoesGerais.isEmpty)
+    }
+
+    func testPausaComEsperaTambemEsperaPelasSessoesSoltasPorUmaPausaAnterior() {
+        // a tela apaga um instante antes de o Mac dormir: quem pausou primeiro não esperou o aviso às câmeras
+        let m = modelo()
+        let abertas = Array(m.sessoesGerais.values)
+        XCTAssertEqual(abertas.count, 3)
+        m.pausar()
+        m.pausar(esperando: 2)
+        XCTAssertTrue(abertas.allSatisfy(\.terminado), "o aviso às câmeras já saiu quando a segunda pausa volta")
     }
 
     func testCameraSumidaSoAvisaNaPrimeiraVezMasSegueProcurando() async throws {

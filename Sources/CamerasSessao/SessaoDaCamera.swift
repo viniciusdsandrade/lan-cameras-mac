@@ -96,12 +96,17 @@ public final class SessaoDaCamera: ObservableObject {
 
     // MARK: - Estado (somente leitura)
 
+    /// Lê o estado de 10 em 10 s, menos enquanto a câmera estiver travada (aceita a conexão do vídeo e não
+    /// responde): cada leitura abre duas conexões (DVRIP e ONVIF) que ela não atende e que só a atrasam. Se a
+    /// leitura falhar por outro motivo, espera mais para tentar de novo.
     private func cicloDeEstado() async {
-        await atualizarEstado()
         while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(10))
-            if Task.isCancelled { break }
-            await atualizarEstado()
+            var espera = 1.0                                   // travada: olha de novo logo, ela pode voltar
+            if !video.cameraMuda {
+                await atualizarEstado()
+                espera = estado?.avisos.isEmpty == false ? 30 : 10
+            }
+            try? await Task.sleep(for: .seconds(espera))
         }
     }
 

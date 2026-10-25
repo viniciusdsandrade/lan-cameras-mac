@@ -43,7 +43,19 @@ public final class SessaoDeVideo: ObservableObject {
     /// Libera a sessão na câmera (elas aguentam poucas).
     public func parar() { fluxo.parar() }
 
+    /// Como `parar()`, e espera (até `segundos`) a câmera ser avisada: para o app que vai fechar.
+    public func pararEsperando(ate segundos: TimeInterval) { fluxo.parar(esperarAte: segundos) }
+
+    /// Depois de `parar()`: a câmera já foi avisada.
+    public var terminado: Bool { fluxo.terminado }
+
+    /// Sem imagem: tenta de novo já, sem esperar a pausa entre as tentativas.
+    public func tentarAgora() { fluxo.tentarAgora() }
+
     public var ultimoQuadro: QuadroDecodificado? { fluxo.ultimoQuadro }
+
+    /// A câmera aceita a conexão e não responde (travada): falar com ela por outros caminhos só a atrasa.
+    public var cameraMuda: Bool { fluxo.cameraMuda }
 
     /// Quem recebe o áudio da câmera (nil para ignorar).
     public func definirOuvinteDeAudio(_ f: (@Sendable (RTPPacket) -> Void)?) { fluxo.aoReceberAudio = f }

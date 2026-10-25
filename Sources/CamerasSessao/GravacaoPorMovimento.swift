@@ -134,6 +134,7 @@ public final class GravacaoPorMovimento: ObservableObject {
         for v in todas { v.parar() }
         let limite = Date().addingTimeInterval(3)
         for v in todas { v.esperarArquivos(ate: max(0.1, limite.timeIntervalSinceNow)) }
+        for v in todas { v.esperarConexao(ate: max(0.1, limite.timeIntervalSinceNow)) }
         manterAcordado(false)
     }
 
