@@ -63,6 +63,11 @@ struct VisaoDaCamera: View {
             HStack(spacing: 6) {
                 Circle().fill(video.estado.cor).frame(width: 9, height: 9)
                 Text(video.estado.mensagem == nil ? "ao vivo" : "sem imagem").font(.caption).foregroundStyle(.secondary)
+                if case .erro = video.estado {
+                    Button("Tentar agora") { video.tentarAgora() }
+                        .controlSize(.small)
+                        .help("Tenta conectar de novo já, sem esperar a próxima tentativa (o app tenta sozinho a cada poucos segundos)")
+                }
             }
         }
     }

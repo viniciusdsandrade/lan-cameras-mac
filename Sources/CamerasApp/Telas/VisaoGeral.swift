@@ -44,7 +44,13 @@ private struct CartaoDaCamera: View {
                            lente: camera.duasLentes ? .movel : .inteira, estado: sessao.estado, zoom: semZoom)
                 .overlay(alignment: .topTrailing) { SeloDeGravacao(gravacao: modelo.gravacao, camera: camera.id).padding(8) }
                 .onTapGesture { modelo.selecionar(.camera(camera.id)) }
-            Button("Abrir \(camera.nome)") { modelo.selecionar(.camera(camera.id)) }
+            HStack {
+                Button("Abrir \(camera.nome)") { modelo.selecionar(.camera(camera.id)) }
+                if case .erro = sessao.estado {
+                    Button("Tentar agora") { sessao.tentarAgora() }
+                        .help("Tenta conectar de novo já, sem esperar a próxima tentativa (o app tenta sozinho a cada poucos segundos)")
+                }
+            }
         }
     }
 }
