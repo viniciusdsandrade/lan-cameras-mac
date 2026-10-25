@@ -54,12 +54,6 @@ struct VisaoDaCamera: View {
                 .accessibilityLabel("Renomear a câmera")
             Spacer()
             SeloDeGravacao(gravacao: modelo.gravacao, camera: sessao.camera.id)
-            if let sinal = sessao.estado?.sinalDoWiFi {
-                Label("Wi-Fi \(sinal)/100", systemImage: "wifi")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .help("Qualidade do Wi-Fi que a câmera enxerga")
-            }
             HStack(spacing: 6) {
                 Circle().fill(video.estado.cor).frame(width: 9, height: 9)
                 Text(video.estado.mensagem == nil ? "ao vivo" : "sem imagem").font(.caption).foregroundStyle(.secondary)

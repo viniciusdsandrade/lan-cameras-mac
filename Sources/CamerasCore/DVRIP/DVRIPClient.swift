@@ -167,7 +167,9 @@ public final class DVRIPClient: @unchecked Sendable {
         }
     }
 
-    /// Qualidade do Wi-Fi que a câmera vê, de 0 a 100 (nil se não informar).
+    /// Qualidade do Wi-Fi que a câmera vê, de 0 a 100 (nil se não informar). NÃO chame em laço nem enquanto a
+    /// câmera transmite: nas XM535 essa consulta demora de 3 a 35 s, faz o rádio varrer o Wi-Fi e, nos registros
+    /// de eventos, aparece dois minutos antes de a câmera perder o Wi-Fi e travar por minutos.
     public func sinalDoWiFi() throws -> Int? {
         let r = try pedir(Self.msgSistema, ["Name": "WifiRouteInfo", "SessionID": sessaoTexto])
         return ((r["WifiRouteInfo"] as? [String: Any])?["SignalLevel"] as? NSNumber)?.intValue

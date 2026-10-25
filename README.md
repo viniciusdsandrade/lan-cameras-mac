@@ -37,6 +37,9 @@ do fabricante.
   responde"), tenta de novo a cada poucos segundos, não a procura na rede (ela está no endereço certo),
   para de ler o estado dela enquanto ela estiver travada e reconecta assim que ela volta; o botão "Tentar
   agora" pula a espera. Depois de uns 3 minutos, a mensagem sugere desligá-la da tomada por 10 s.
+  O app também não pergunta às câmeras o sinal de Wi-Fi: nas XM535 essa consulta (`WifiRouteInfo`) faz o
+  rádio varrer o Wi-Fi enquanto ela transmite vídeo e, no registro de eventos das câmeras, aparece uns
+  minutos antes de elas perderem o Wi-Fi e travarem (as quedas de Wi-Fi também acontecem sozinhas).
 
 ## Usar
 

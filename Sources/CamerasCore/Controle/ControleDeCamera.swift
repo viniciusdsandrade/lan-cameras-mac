@@ -11,6 +11,9 @@ public struct EstadoDaCamera: Sendable, Equatable {
     public var luz: ModoDaLuz?
     public var rastreioLigado: Bool?
     public var rastreioVoltaEmSegundos: Int?
+    /// Não é mais lido: a consulta do sinal (WifiRouteInfo) faz as XM535 varrerem o Wi-Fi enquanto transmitem
+    /// vídeo, e com isso chegaram a travar e a perder o Wi-Fi (o registro de eventos delas mostra os dois em
+    /// seguida). O campo fica, sempre vazio, porque o app de iPhone o lê.
     public var sinalDoWiFi: Int?
     public var presets: [PresetDaCamera] = []
     /// Partes que não deu para ler (a câmera pode responder umas coisas e outras não).
@@ -41,7 +44,7 @@ public final class ControleDeCamera: Sendable {
         try DVRIPClient.executar(host: camera.host, porta: portaDVRIP, usuario: camera.usuario, hash: camera.hash, corpo)
     }
 
-    /// Lê luz, rastreio, sinal e posições salvas sem mudar nada.
+    /// Lê luz, rastreio e posições salvas sem mudar nada. Não pergunta o sinal do Wi-Fi: veja `EstadoDaCamera`.
     public func lerEstado() -> EstadoDaCamera {
         var e = EstadoDaCamera()
         do {
@@ -50,9 +53,8 @@ public final class ControleDeCamera: Sendable {
                 let r = try d.rastreio()
                 e.rastreioLigado = r.ligado
                 e.rastreioVoltaEmSegundos = r.voltaEmSegundos
-                e.sinalDoWiFi = try? d.sinalDoWiFi()
             }
-        } catch { e.avisos.append("não consegui ler luz, rastreio e Wi-Fi: \(error)") }
+        } catch { e.avisos.append("não consegui ler luz e rastreio: \(error)") }
         do { e.presets = try onvif.presets() }
         catch { e.avisos.append("não consegui ler as posições salvas (\(error))") }
         return e

@@ -117,13 +117,12 @@ func comandoEstado(_ opcoes: Opcoes) {
     for c in alvo {
         print("== \(c.nome) (\(c.modelo ?? "?"))")
         do {
-            let (luz, rastreio, sinal) = try DVRIPClient.executar(host: c.host, usuario: c.usuario, hash: c.hash) { d in
-                (try d.modoDaLuz(), try d.rastreio(), try d.sinalDoWiFi())
+            let (luz, rastreio) = try DVRIPClient.executar(host: c.host, usuario: c.usuario, hash: c.hash) { d in
+                (try d.modoDaLuz(), try d.rastreio())
             }
             print("   luz: \(luz.map { "\($0)" } ?? "desconhecida")")
             print("   rastreio: \(rastreio.ligado ? "ligado" : "desligado")"
                   + (rastreio.voltaEmSegundos.map { ", volta ao ponto de vigia em \($0) s" } ?? ""))
-            print("   sinal do Wi-Fi: \(sinal.map { "\($0)/100" } ?? "?")")
         } catch { print("   DVRIP: \(error)") }
         do {
             let presets = try c.onvif.presets()
