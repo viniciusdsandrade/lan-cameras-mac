@@ -116,7 +116,10 @@ final class CartaoDaCameraTests: XCTestCase {
     /// Uma foto como a câmera manda: o quadro FE (16 bytes de cabeçalho) e um "JPEG" de 1000 bytes.
     static let jpeg: [UInt8] = [0xFF, 0xD8] + [UInt8](repeating: 0x42, count: 996) + [0xFF, 0xD9]
     static var fotoNoCartao: [UInt8] {
-        [0, 0, 1, 0xFE, 2, 0x40, 0, 0, 0, 0, 0x42, 0x68] + (0..<4).map { UInt8((jpeg.count >> (8 * $0)) & 0xFF) } + jpeg
+        // em partes com o tipo dito: numa expressão só, o compilador do Xcode 16 desiste de achar os tipos
+        let cabecalho: [UInt8] = [0, 0, 1, 0xFE, 2, 0x40, 0, 0, 0, 0, 0x42, 0x68]
+        let tamanho: [UInt8] = (0..<4).map { UInt8((jpeg.count >> (8 * $0)) & 0xFF) }
+        return cabecalho + tamanho + jpeg
     }
     /// Três fotos, uma em cada um dos três primeiros vídeos (anunciadas com 2 KB: a câmera arredonda para cima).
     private static var fotos: [[String: Any]] {
