@@ -31,6 +31,12 @@ do fabricante.
   procura a câmera pelo número de série, pega os dados novos com ela e reabre só as conexões
   dela. O vídeo não fica tentando de novo com a senha recusada (as câmeras podem bloquear a
   conta depois de várias tentativas erradas).
+- Câmera travada: de vez em quando o programa de uma câmera trava por alguns minutos e depois volta
+  sozinho, sem ela reiniciar. A rede dela segue viva (o ping responde e a porta aceita a conexão), mas o
+  vídeo, o ONVIF e o DVRIP não respondem. O app diz isso na tela ("a câmera está na rede, mas não
+  responde"), tenta de novo a cada poucos segundos, não a procura na rede (ela está no endereço certo),
+  para de ler o estado dela enquanto ela estiver travada e reconecta assim que ela volta; o botão "Tentar
+  agora" pula a espera. Depois de uns 3 minutos, a mensagem sugere desligá-la da tomada por 10 s.
 
 ## Usar
 
@@ -53,7 +59,8 @@ imagem aproximada e o duplo clique volta ao normal.
 
 O app só fica conectado às câmeras enquanto alguém pode ver o vídeo: ao minimizar ou
 fechar a janela, ocultar o app ou quando o Mac dorme, ele solta as conexões (as câmeras
-aguentam poucas ao mesmo tempo) e as reabre ao voltar.
+aguentam poucas ao mesmo tempo) e as reabre ao voltar. Ao soltar, avisa cada câmera (TEARDOWN) e,
+quando o Mac vai dormir ou o app vai fechar, espera esse aviso sair antes de seguir.
 
 A exceção é a gravação pelo Mac: ligada e no horário, ela mantém uma conexão com cada
 câmera vigiada mesmo com a janela fechada e a tela apagada, e o Mac não dorme sozinho (a
@@ -131,6 +138,13 @@ E para ver o que uma câmera gravou no cartão (e baixar uma gravação como MP4
 
 ```sh
 swift run camspike cartao --camera NOME --horas 12 --baixar ultimo --saida gravacao.mp4
+```
+
+Para saber se uma câmera está travada (aceita a conexão e não responde) ou sumiu, e acompanhar quando
+ela trava e quando volta (uma linha por mudança, sem usar a senha):
+
+```sh
+swift run camspike sondar --camera NOME --segundos 600
 ```
 
 Para ver e testar as telas de gravações sem câmeras de verdade (e sem a imagem de nenhuma casa),
