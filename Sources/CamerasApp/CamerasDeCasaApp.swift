@@ -18,8 +18,14 @@ struct CamerasDeCasaApp: App {
         }
         .defaultSize(width: Self.argumento("--largura") ?? 1240, height: Self.argumento("--altura") ?? 900)
         .commands {
+            SidebarCommands()
+            InspectorCommands()
+            CommandGroup(replacing: .help) {
+                Button("Como usar o Câmeras de Casa") { NotificationCenter.default.post(name: .mostrarAjuda, object: nil) }
+                    .keyboardShortcut("?", modifiers: .command)
+            }
             CommandMenu("Câmeras") {
-                Button("Visão geral") { modelo.selecionar(.geral) }
+                Button("Todas as câmeras") { modelo.selecionar(.geral) }
                     .keyboardShortcut("0")
                 ForEach(Array(modelo.cameras.prefix(9).enumerated()), id: \.element.id) { i, c in
                     Button(c.nome) { modelo.selecionar(.camera(c.id)) }

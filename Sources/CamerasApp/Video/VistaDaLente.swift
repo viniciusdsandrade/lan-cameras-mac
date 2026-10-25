@@ -74,6 +74,12 @@ final class LenteNSView: NSView {
         exibidor.limpar()
     }
 
+    /// Sem zoom (no mosaico e na lente fixa), clique e ponteiro são da tela por cima (abrir a câmera,
+    /// acender o quadro): o vídeo não fica com eles.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        zoomHabilitado ? super.hitTest(point) : nil
+    }
+
     override func layout() {
         super.layout()
         atualizarGeometria()

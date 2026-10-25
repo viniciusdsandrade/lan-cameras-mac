@@ -12,113 +12,117 @@ extension FluxoDeVideo.Estado {
         }
     }
 
-    /// Texto que cobre o vídeo enquanto não há imagem; nil quando está ao vivo.
-    var mensagem: String? {
+    /// Em poucas palavras, para os selos e a barra.
+    var rotulo: String {
         switch self {
-        case .aoVivo: return nil
-        case .conectando: return "conectando…"
-        case .parado: return "parado"
-        case .erro(let m): return "sem imagem: \(m)"
+        case .aoVivo: return "Ao vivo"
+        case .conectando: return "Conectando…"
+        case .erro: return "Sem imagem"
+        case .parado: return "Parado"
         }
+    }
+
+    var aoVivo: Bool {
+        if case .aoVivo = self { return true }
+        return false
+    }
+
+    /// "H.265 · 2304×2592", enquanto está ao vivo.
+    var detalhe: String? {
+        guard case .aoVivo(let codec, let largura, let altura) = self else { return nil }
+        return "\(codec) · \(largura)×\(altura)"
     }
 }
 
-/// Uma lente de uma câmera na tela, com o nome e o estado da conexão por cima.
-struct LenteComRotulo: View {
-    let rotulo: String
+/// Uma lente ao vivo: o vídeo e, enquanto não há imagem, o que está acontecendo por cima dele
+/// (conectando, ou por que não há imagem e como tentar de novo), em vez de um quadro preto mudo.
+struct LenteAoVivo: View {
     let distribuidor: DistribuidorDeQuadros
     let lente: LenteExibida
     let estado: FluxoDeVideo.Estado
     @ObservedObject var zoom: EstadoDeZoom
     var zoomHabilitado = false
+    /// Nos quadros do mosaico: textos menores e o motivo em no máximo duas linhas.
+    var compacta = false
+    var tentarAgora: (() -> Void)?
 
     var body: some View {
         ZStack {
+            Color.black
             VistaDaLente(distribuidor: distribuidor, lente: lente, zoom: zoom, zoomHabilitado: zoomHabilitado)
-            if let m = estado.mensagem {
-                Text(m)
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .multilineTextAlignment(.center)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(.black.opacity(0.7))
-                    .allowsHitTesting(false)
+            if !estado.aoVivo {
+                SemImagem(estado: estado, compacta: compacta, tentarAgora: tentarAgora)
             }
         }
-        .aspectRatio(16 / 9, contentMode: .fit)
-        .overlay(alignment: .topLeading) {
-            HStack(spacing: 6) {
-                Circle().fill(estado.cor).frame(width: 8, height: 8)
-                Text(rotulo).font(.caption.weight(.medium))
-            }
-            .foregroundStyle(.white)
-            .padding(.vertical, 3)
-            .padding(.horizontal, 9)
-            .background(.black.opacity(0.6), in: Capsule())
-            .padding(8)
-            .allowsHitTesting(false)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.1)))
     }
 }
 
-/// Botão que age ENQUANTO está pressionado (as setas de movimento): chama `aoPressionar` ao
-/// apertar e `aoSoltar` ao soltar, mesmo que o ponteiro saia de cima dele.
-struct BotaoDePressao: View {
-    let simbolo: String
-    let descricao: String
-    let ativo: Bool
-    let aoPressionar: () -> Void
-    let aoSoltar: () -> Void
-    @State private var pressionado = false
+private struct SemImagem: View {
+    let estado: FluxoDeVideo.Estado
+    let compacta: Bool
+    let tentarAgora: (() -> Void)?
 
     var body: some View {
-        let aceso = ativo || pressionado
-        Image(systemName: simbolo)
-            .font(.system(size: 20, weight: .semibold))
-            .foregroundStyle(aceso ? Color.white : Color.primary)
-            .frame(width: 56, height: 56)
-            .background(RoundedRectangle(cornerRadius: 10).fill(aceso ? Color.accentColor : Color(nsColor: .controlBackgroundColor)))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.15)))
-            .contentShape(RoundedRectangle(cornerRadius: 10))
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        if !pressionado { pressionado = true; aoPressionar() }
-                    }
-                    .onEnded { _ in
-                        pressionado = false
-                        aoSoltar()
-                    }
-            )
-            .accessibilityLabel(descricao)
-            .accessibilityAddTraits(.isButton)
-            .help("Segure para mover \(descricao)")
+        VStack(spacing: compacta ? 6 : 10) {
+            switch estado {
+            case .conectando:
+                ProgressView().controlSize(compacta ? .small : .regular)
+                Text("Conectando…").font(compacta ? .callout : .title3).foregroundStyle(.white.opacity(0.85))
+            case .erro(let motivo):
+                Image(systemName: "wifi.exclamationmark")
+                    .font(.system(size: compacta ? 22 : 34, weight: .semibold))
+                    .foregroundStyle(.red)
+                Text("Sem imagem").font((compacta ? Font.callout : .title3).weight(.semibold))
+                Text(motivo)
+                    .font(compacta ? .caption : .callout)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(compacta ? 2 : 4)
+                    .frame(maxWidth: 420)
+                    .help(motivo)
+                if let tentarAgora {
+                    Button("Tentar agora", action: tentarAgora)
+                        .controlSize(compacta ? .small : .regular)
+                        .help("Tenta conectar de novo já, sem esperar a próxima tentativa (o app tenta sozinho a cada poucos segundos)")
+                }
+            case .parado, .aoVivo:
+                Image(systemName: "pause.circle").font(.system(size: compacta ? 22 : 34)).foregroundStyle(.white.opacity(0.6))
+                Text("Parado").font(compacta ? .callout : .title3).foregroundStyle(.white.opacity(0.85))
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(compacta ? 10 : 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.black.opacity(0.66))
     }
 }
 
-/// Os avisos curtos no pé da janela (feito, erro, dica).
+/// Os avisos curtos no pé da janela (feito, erro, dica), flutuando por cima de tudo.
 struct AvisoView: View {
     @EnvironmentObject var modelo: ModeloDoApp
 
     var body: some View {
         if let aviso = modelo.aviso {
             HStack(spacing: 10) {
-                Image(systemName: icone(aviso.tipo)).foregroundStyle(cor(aviso.tipo))
-                Text(aviso.texto).font(.callout).textSelection(.enabled)
+                Image(systemName: icone(aviso.tipo))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(cor(aviso.tipo))
+                Text(aviso.texto)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let arquivo = aviso.arquivo {
-                    Button("Mostrar") { NSWorkspace.shared.activateFileViewerSelecting([arquivo]) }
+                    Button("Mostrar no Finder") { NSWorkspace.shared.activateFileViewerSelecting([arquivo]) }
                         .buttonStyle(.link)
                 }
             }
-            .padding(.vertical, 9)
-            .padding(.horizontal, 14)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(cor(aviso.tipo).opacity(0.5)))
-            .shadow(radius: 8, y: 2)
-            .padding(.bottom, 18)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 16)
+            .frame(maxWidth: 680)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(cor(aviso.tipo).opacity(0.45)))
+            .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
+            .padding(.bottom, 22)
             .padding(.horizontal, 24)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .id(aviso.id)
@@ -142,19 +146,44 @@ struct AvisoView: View {
     }
 }
 
-/// Seção do painel de controles.
+/// Um bloco do painel de controles: o título pequeno em cima e o conteúdo num cartão.
 struct Secao<Conteudo: View>: View {
     let titulo: String
     let simbolo: String
     @ViewBuilder let conteudo: () -> Conteudo
 
     var body: some View {
-        GroupBox {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(titulo, systemImage: simbolo)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .padding(.leading, 4)
             VStack(alignment: .leading, spacing: 10, content: conteudo)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 4)
-        } label: {
-            Label(titulo, systemImage: simbolo).font(.headline)
+                .cartao()
         }
+    }
+}
+
+/// Uma linha de rótulo e controle nos cartões ("Velocidade  [Lenta | Média | Rápida]").
+struct LinhaDeAjuste<Controle: View>: View {
+    let rotulo: String
+    @ViewBuilder let controle: () -> Controle
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(rotulo).font(.callout).foregroundStyle(.secondary).frame(width: 76, alignment: .leading)
+            controle()
+        }
+    }
+}
+
+/// Texto de apoio pequeno, embaixo de um controle.
+struct Nota: View {
+    let texto: String
+    init(_ texto: String) { self.texto = texto }
+
+    var body: some View {
+        Text(texto).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
 }

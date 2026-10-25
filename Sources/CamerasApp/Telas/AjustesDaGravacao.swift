@@ -3,7 +3,7 @@ import AppKit
 import CamerasCore
 import CamerasSessao
 
-/// Os Ajustes do app (⌘,): por enquanto, só a gravação pelo Mac.
+/// Os Ajustes do app (⌘,): a gravação pelo Mac e os arquivos que ela já gravou.
 struct AjustesDoApp: View {
     @EnvironmentObject var modelo: ModeloDoApp
 
@@ -11,65 +11,99 @@ struct AjustesDoApp: View {
         TabView {
             AjustesDaGravacaoNoMac(gravacao: modelo.gravacao)
                 .tabItem { Label("Gravação no Mac", systemImage: "record.circle") }
+            ArquivosGravadosNoMac(gravacao: modelo.gravacao)
+                .tabItem { Label("Arquivos", systemImage: "film.stack") }
         }
-        .frame(width: 900, height: 620)
+        .frame(width: 640, height: 660)
     }
 }
 
-/// A gravação feita pelo Mac, uma cópia opcional enquanto ele estiver ligado: ajustes à esquerda,
-/// os arquivos dela à direita. (O que as câmeras gravam sozinhas no cartão fica em Gravações.)
+/// A gravação feita pelo Mac, uma cópia opcional enquanto ele estiver ligado, nos moldes dos Ajustes do
+/// Sistema. (O que as câmeras gravam sozinhas no cartão fica em Gravações.)
 struct AjustesDaGravacaoNoMac: View {
     @EnvironmentObject var modelo: ModeloDoApp
     @ObservedObject var gravacao: GravacaoPorMovimento
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Gravação no Mac").font(.title2.weight(.semibold))
-                    Text("As câmeras já gravam sozinhas no cartão (veja em Gravações). Além disso, o Mac pode gravar uma cópia, com o som, sempre que algo se mexe na imagem: começa uns segundos antes e segue enquanto houver movimento. Fica a salvo mesmo se alguém levar a câmera junto com o cartão, mas só grava com o Mac ligado.")
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Toggle(isOn: $gravacao.ajustes.ligada) {
+        Form {
+            Section {
+                Toggle(isOn: $gravacao.ajustes.ligada) {
+                    VStack(alignment: .leading, spacing: 3) {
                         Text("Gravar também neste Mac").font(.headline)
+                        Text("As câmeras já gravam sozinhas no cartão (veja em Gravações). Além disso, o Mac pode gravar uma cópia, com o som, sempre que algo se mexe na imagem: começa uns segundos antes e segue enquanto houver movimento. Fica a salvo mesmo se alguém levar a câmera junto com o cartão, mas só grava com o Mac ligado.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .toggleStyle(.switch)
-                    quando
-                    cameras
-                    deteccao
-                    cuidados
                 }
-                .padding(22)
+                .toggleStyle(.switch)
             }
-            .frame(width: 490)
-            Divider()
-            arquivos
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .onAppear { gravacao.recarregarRecentes() }
-    }
-
-    // MARK: - Ajustes
-
-    private var quando: some View {
-        Secao(titulo: "Quando", simbolo: "moon.stars") {
-            Picker("Quando", selection: $gravacao.ajustes.soANoite) {
-                Text("Só à noite").tag(true)
-                Text("O dia todo").tag(false)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            if gravacao.ajustes.soANoite {
-                HStack(spacing: 8) {
-                    Text("Das")
-                    seletorDeHora($gravacao.ajustes.inicio, nome: "Começo")
-                    Text("às")
-                    seletorDeHora($gravacao.ajustes.fim, nome: "Fim")
-                    Spacer()
+            Section {
+                Picker("Grava", selection: $gravacao.ajustes.soANoite) {
+                    Text("Só à noite").tag(true)
+                    Text("O dia todo").tag(false)
                 }
-                Text("Fora desse horário as câmeras ficam livres.").font(.caption).foregroundStyle(.secondary)
+                .pickerStyle(.segmented)
+                if gravacao.ajustes.soANoite {
+                    LabeledContent("Horário") {
+                        HStack(spacing: 8) {
+                            Text("das")
+                            seletorDeHora($gravacao.ajustes.inicio, nome: "Começo")
+                            Text("às")
+                            seletorDeHora($gravacao.ajustes.fim, nome: "Fim")
+                        }
+                    }
+                }
+            } header: {
+                Text("Quando")
+            } footer: {
+                if gravacao.ajustes.soANoite { NotaDeRodape("Fora desse horário as câmeras ficam livres.") }
             }
+            Section("Câmeras vigiadas") {
+                ForEach(modelo.cameras) { c in
+                    Toggle(isOn: Binding(get: { gravacao.vigiada(c.id) }, set: { gravacao.definir(c.id, vigiada: $0) })) {
+                        HStack {
+                            Text(c.nome)
+                            Spacer()
+                            if let s = gravacao.situacoes[c.id] { SeloDaSituacao(situacao: s, inicio: gravacao.ajustes.inicio) }
+                        }
+                    }
+                }
+            }
+            Section {
+                Picker("Sensibilidade", selection: $gravacao.ajustes.sensibilidade) {
+                    Text("Baixa").tag(SensibilidadeDeMovimento.baixa)
+                    Text("Média").tag(SensibilidadeDeMovimento.media)
+                    Text("Alta").tag(SensibilidadeDeMovimento.alta)
+                }
+                .pickerStyle(.segmented)
+                Text(Self.explicacao(gravacao.ajustes.sensibilidade))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Toggle("Gravar o som da câmera", isOn: $gravacao.ajustes.gravarSom)
+                Picker("Qualidade", selection: $gravacao.ajustes.hd) {
+                    Text("HD").tag(true)
+                    Text("Leve").tag(false)
+                }
+                .pickerStyle(.segmented)
+            } header: {
+                Text("Detecção e gravação")
+            } footer: {
+                NotaDeRodape("O vídeo é gravado como a câmera manda, sem recomprimir: à noite, em HD, cada minuto ocupa uns 2 a 4 MB.")
+            }
+            Section("Bom saber") {
+                Label("Enquanto vigia, o Mac não dorme sozinho (a tela pode apagar). Num notebook, fechar a tampa sem monitor externo faz ele dormir e a gravação para.",
+                      systemImage: "powersleep")
+                Label("A gravação segue com a janela minimizada ou fechada, mas para se o app for encerrado (⌘Q).",
+                      systemImage: "macwindow")
+                Label("Cada câmera vigiada fica com uma conexão a mais aberta: elas aceitam poucas ao mesmo tempo.",
+                      systemImage: "network")
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
         }
+        .formStyle(.grouped)
     }
 
     private func seletorDeHora(_ hora: Binding<Int>, nome: String) -> some View {
@@ -77,49 +111,8 @@ struct AjustesDaGravacaoNoMac: View {
             ForEach(0..<24, id: \.self) { Text("\($0) h").tag($0) }
         }
         .labelsHidden()
-        .frame(width: 80)
+        .fixedSize()
         .accessibilityLabel(nome)
-    }
-
-    private var cameras: some View {
-        Secao(titulo: "Câmeras", simbolo: "video") {
-            ForEach(modelo.cameras) { c in
-                HStack {
-                    Toggle(c.nome, isOn: Binding(get: { gravacao.vigiada(c.id) },
-                                                 set: { gravacao.definir(c.id, vigiada: $0) }))
-                    Spacer()
-                    if let s = gravacao.situacoes[c.id] { SeloDaSituacao(situacao: s, inicio: gravacao.ajustes.inicio) }
-                }
-            }
-        }
-    }
-
-    private var deteccao: some View {
-        Secao(titulo: "Detecção e gravação", simbolo: "slider.horizontal.3") {
-            HStack {
-                Text("Sensibilidade").font(.callout).foregroundStyle(.secondary)
-                Picker("Sensibilidade", selection: $gravacao.ajustes.sensibilidade) {
-                    Text("Baixa").tag(SensibilidadeDeMovimento.baixa)
-                    Text("Média").tag(SensibilidadeDeMovimento.media)
-                    Text("Alta").tag(SensibilidadeDeMovimento.alta)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-            Text(Self.explicacao(gravacao.ajustes.sensibilidade)).font(.caption).foregroundStyle(.secondary)
-            Toggle("Gravar o som da câmera", isOn: $gravacao.ajustes.gravarSom)
-            HStack {
-                Text("Qualidade").font(.callout).foregroundStyle(.secondary)
-                Picker("Qualidade", selection: $gravacao.ajustes.hd) {
-                    Text("HD").tag(true)
-                    Text("Leve").tag(false)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-            Text("O vídeo é gravado como a câmera manda, sem recomprimir: à noite, em HD, cada minuto ocupa uns 2 a 4 MB.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
     }
 
     private static func explicacao(_ s: SensibilidadeDeMovimento) -> String {
@@ -129,49 +122,48 @@ struct AjustesDaGravacaoNoMac: View {
         case .alta: return "Também bichos pequenos e movimentos leves. Grava mais à toa: galhos ao vento, insetos perto da lente ou de uma luz."
         }
     }
+}
 
-    private var cuidados: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("Enquanto vigia, o Mac não dorme sozinho (a tela pode apagar). Num notebook, fechar a tampa sem monitor externo faz ele dormir e a gravação para.",
-                  systemImage: "powersleep")
-            Label("A gravação segue com a janela minimizada ou fechada, mas para se o app for encerrado (⌘Q).",
-                  systemImage: "macwindow")
-            Label("Cada câmera vigiada fica com uma conexão a mais aberta: elas aceitam poucas ao mesmo tempo.",
-                  systemImage: "network")
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
+/// O texto embaixo de uma seção dos ajustes, como nos Ajustes do Sistema.
+private struct NotaDeRodape: View {
+    let texto: String
+    init(_ texto: String) { self.texto = texto }
+
+    var body: some View {
+        Text(texto).font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
     }
+}
 
-    // MARK: - Arquivos
+/// Os vídeos que o Mac já gravou, do mais novo para o mais antigo.
+struct ArquivosGravadosNoMac: View {
+    @ObservedObject var gravacao: GravacaoPorMovimento
 
-    private var arquivos: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Gravações", systemImage: "film.stack").font(.headline)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Gravados neste Mac").font(.headline)
+                    Text("Em \(Plataforma.ondeFicamAsGravacoes)").font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("Abrir a pasta") { abrirPasta() }
             }
-            Text("Em \(Plataforma.ondeFicamAsGravacoes)").font(.caption).foregroundStyle(.secondary)
+            .padding(16)
+            Divider()
             if gravacao.recentes.isEmpty {
-                Text(gravacao.ajustes.ligada ? "Nenhuma gravação ainda." : "Nenhuma gravação. Ligue a gravação ao lado.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 8)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(gravacao.recentes) { a in
-                            LinhaDeGravacao(arquivo: a)
-                            Divider()
-                        }
-                    }
-                    .padding(.top, 4)
+                VStack(spacing: 10) {
+                    Image(systemName: "film.stack").font(.system(size: 36)).foregroundStyle(.secondary)
+                    Text(gravacao.ajustes.ligada ? "Nenhuma gravação ainda." : "Nenhuma gravação. Ligue a gravação na outra aba.")
+                        .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(gravacao.recentes) { a in LinhaDeGravacao(arquivo: a) }
+                    .listStyle(.inset)
+                    .scrollContentBackground(.hidden)
             }
         }
-        .padding(22)
+        .onAppear { gravacao.recarregarRecentes() }
     }
 
     private func abrirPasta() {
@@ -185,7 +177,7 @@ private struct LinhaDeGravacao: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "film").foregroundStyle(.secondary)
+            Image(systemName: "film").foregroundStyle(.secondary).frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
                 Text(arquivo.url.deletingPathExtension().lastPathComponent).lineLimit(1).truncationMode(.middle)
                 Text(detalhes).font(.caption).foregroundStyle(.secondary)
@@ -200,6 +192,7 @@ private struct LinhaDeGravacao: View {
                 .help("Mostrar no Finder")
                 .accessibilityLabel("Mostrar \(arquivo.url.lastPathComponent) no Finder")
         }
+        .padding(.vertical, 3)
     }
 
     private var detalhes: String {
@@ -231,32 +224,43 @@ struct SeloDaSituacao: View {
     }
 }
 
-/// Selo por cima do vídeo de uma câmera enquanto a gravação a vigia.
+/// Selo por cima do vídeo de uma câmera enquanto a gravação pelo Mac a vigia: "REC" em vermelho
+/// (com o ponto piscando, a não ser que o sistema peça menos movimento) enquanto grava.
 struct SeloDeGravacao: View {
     @ObservedObject var gravacao: GravacaoPorMovimento
     let camera: String
+    @Environment(\.accessibilityReduceMotion) private var semMovimento
+    @State private var apagado = false
 
     var body: some View {
         switch gravacao.situacoes[camera] {
         case .gravando:
-            selo("REC", simbolo: "record.circle.fill", cor: .red)
-                .help("Gravando: há movimento nesta câmera")
+            HStack(spacing: 5) {
+                Circle().fill(.white).frame(width: 7, height: 7).opacity(apagado ? 0.3 : 1)
+                Text("REC").font(.system(size: 11, weight: .heavy)).tracking(0.5)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.red, in: Capsule())
+            .onAppear {
+                guard !semMovimento else { return }
+                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { apagado = true }
+            }
+            .help("Gravando no Mac: há movimento nesta câmera")
+            .allowsHitTesting(false)
         case .vigiando:
-            selo("vigiando", simbolo: "eye", cor: .white.opacity(0.85))
-                .help("Gravação por movimento ligada")
+            Image(systemName: "eye")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 24, height: 20)
+                .background(Tema.sobreVideo, in: Capsule())
+                .accessibilityLabel("Vigiando")
+                .help("A gravação no Mac vigia esta câmera: grava quando algo se mexer")
+                .allowsHitTesting(false)
         default:
             EmptyView()
         }
-    }
-
-    private func selo(_ texto: String, simbolo: String, cor: Color) -> some View {
-        Label(texto, systemImage: simbolo)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(cor)
-            .padding(.vertical, 3)
-            .padding(.horizontal, 9)
-            .background(.black.opacity(0.6), in: Capsule())
-            .allowsHitTesting(false)
     }
 }
 

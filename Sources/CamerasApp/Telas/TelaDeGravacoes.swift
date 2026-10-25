@@ -13,9 +13,10 @@ enum CoresDasCameras {
     }
 }
 
-/// O que as câmeras gravaram sozinhas no cartão. Em cima, a noite (os dias recentes, a câmera e a
-/// linha do tempo); à esquerda, a galeria com a foto de cada movimento; à direita, o movimento
-/// escolhido, que toca aqui mesmo. ← e → passam de um para outro; espaço toca e pausa.
+/// O que as câmeras gravaram sozinhas no cartão. Em cima, a noite (os dias recentes e a linha do
+/// tempo, com o período e a câmera na barra da janela); à esquerda, a galeria com a foto de cada
+/// movimento; à direita, o movimento escolhido, que toca aqui mesmo. ← e → passam de um para outro;
+/// espaço toca e pausa.
 struct TelaDeGravacoes: View {
     @EnvironmentObject var modelo: ModeloDoApp
     @ObservedObject var cartoes: CartoesDasCameras
@@ -27,15 +28,18 @@ struct TelaDeGravacoes: View {
     var body: some View {
         VStack(spacing: 0) {
             BarraDasGravacoes(cartoes: cartoes)
-            Divider()
             HStack(spacing: 0) {
                 GaleriaDeEventos(cartoes: cartoes)
-                    .frame(width: 440)
+                    .frame(minWidth: 290, idealWidth: 430, maxWidth: 430)
                 Divider()
                 DetalheDoEvento(cartoes: cartoes, reprodutor: reprodutor, tocando: $tocando)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .background(Tema.fundo)
+        .navigationTitle("Gravações")
+        .navigationSubtitle("No cartão das câmeras")
+        .toolbar { filtros }
         .focusable()
         .focused($focada)
         .focusEffectDisabled()
@@ -46,6 +50,34 @@ struct TelaDeGravacoes: View {
         .onAppear {
             cartoes.abrir()
             focada = true
+        }
+    }
+
+    @ToolbarContentBuilder private var filtros: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Picker("Período", selection: $cartoes.periodo) {
+                Text("Noite").tag(CartoesDasCameras.Periodo.noite)
+                Text("Dia todo").tag(CartoesDasCameras.Periodo.diaTodo)
+            }
+            .pickerStyle(.segmented)
+            .help("Só a noite (das 18 h às 6 h) ou o dia inteiro")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Picker("Câmera", selection: $cartoes.camera) {
+                Text("Todas as câmeras").tag(String?.none)
+                Divider()
+                ForEach(modelo.cameras) { c in Text(c.nome).tag(Optional(c.id)) }
+            }
+            .pickerStyle(.menu)
+            .frame(minWidth: 160)
+            .help("De qual câmera")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                cartoes.recarregarEventos()
+                cartoes.recarregarEstados()
+            } label: { Label("Procurar de novo", systemImage: "arrow.clockwise") }
+                .help("Procurar de novo nos cartões")
         }
     }
 
@@ -68,55 +100,35 @@ private struct BarraDasGravacoes: View {
     @State private var escolhendoDia = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(cartoes.diasRecentes, id: \.self) { d in chip(d) }
-                        Button { escolhendoDia = true } label: {
-                            Image(systemName: "calendar")
-                                .padding(.vertical, 5)
-                                .padding(.horizontal, 9)
-                                .background(Capsule().fill(Color.primary.opacity(0.07)))
-                        }
-                        .buttonStyle(.plain)
-                        .help("Outro dia")
-                        .accessibilityLabel("Escolher outro dia")
-                        .popover(isPresented: $escolhendoDia) {
-                            DatePicker("Dia", selection: $cartoes.dia, in: ...Date(), displayedComponents: .date)
-                                .datePickerStyle(.graphical)
-                                .labelsHidden()
-                                .padding()
-                        }
+        VStack(alignment: .leading, spacing: 14) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(cartoes.diasRecentes, id: \.self) { d in chip(d) }
+                    Button { escolhendoDia = true } label: {
+                        Image(systemName: "calendar")
+                            .frame(height: 28)
+                            .padding(.horizontal, 11)
+                            .background(Capsule().fill(Tema.cartao))
+                            .overlay(Capsule().strokeBorder(Tema.borda))
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Outro dia")
+                    .accessibilityLabel("Escolher outro dia")
+                    .popover(isPresented: $escolhendoDia) {
+                        DatePicker("Dia", selection: $cartoes.dia, in: ...Date(), displayedComponents: .date)
+                            .datePickerStyle(.graphical)
+                            .labelsHidden()
+                            .padding()
                     }
                 }
-                Picker("Período", selection: $cartoes.periodo) {
-                    Text("Noite").tag(CartoesDasCameras.Periodo.noite)
-                    Text("Dia todo").tag(CartoesDasCameras.Periodo.diaTodo)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 150)
-                Picker("Câmera", selection: $cartoes.camera) {
-                    Text("Todas as câmeras").tag(String?.none)
-                    Divider()
-                    ForEach(modelo.cameras) { c in Text(c.nome).tag(Optional(c.id)) }
-                }
-                .labelsHidden()
-                .frame(width: 180)
-                Button {
-                    cartoes.recarregarEventos()
-                    cartoes.recarregarEstados()
-                } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.borderless)
-                    .help("Procurar de novo")
-                    .accessibilityLabel("Procurar de novo")
             }
             LinhaDoTempo(cartoes: cartoes)
         }
         .padding(.horizontal, 18)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     private func chip(_ d: Date) -> some View {
@@ -124,10 +136,12 @@ private struct BarraDasGravacoes: View {
         return Button { cartoes.dia = d } label: {
             Text(cartoes.rotulo(do: d))
                 .font(.callout.weight(escolhido ? .semibold : .regular))
-                .padding(.vertical, 5)
-                .padding(.horizontal, 12)
-                .background(Capsule().fill(escolhido ? Color.accentColor : Color.primary.opacity(0.07)))
+                .frame(height: 28)
+                .padding(.horizontal, 13)
+                .background(Capsule().fill(escolhido ? Color.accentColor : Tema.cartao))
+                .overlay(Capsule().strokeBorder(escolhido ? Color.clear : Tema.borda))
                 .foregroundStyle(escolhido ? Color.white : Color.primary)
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(escolhido ? .isSelected : [])
@@ -143,32 +157,37 @@ private struct LinhaDoTempo: View {
     var body: some View {
         let (de, ate) = cartoes.intervalo()
         let eventos: [EventoDoCartao] = { if case .pronto(let l) = cartoes.eventos { return l } else { return [] } }()
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(resumo(eventos)).font(.callout.weight(.medium))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 14) {
+                Text(resumo(eventos)).font(.callout.weight(.semibold))
+                if case .lendo = cartoes.eventos { ProgressView().controlSize(.small) }
                 Spacer()
+                legenda(eventos)
             }
             GeometryReader { g in
                 let w = g.size.width
                 let total = max(1, ate.timeIntervalSince(de))
                 let x = { (d: Date) in CGFloat(d.timeIntervalSince(de) / total) * w }
                 ZStack(alignment: .topLeading) {
-                    RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.07)).frame(width: w, height: 22)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Tema.cartao).frame(width: w, height: 30)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Tema.borda).frame(width: w, height: 30)
                     ForEach(marcas(de: de, ate: ate), id: \.self) { h in
-                        Rectangle().fill(Color.primary.opacity(0.12)).frame(width: 1, height: 22).offset(x: x(h))
+                        Rectangle().fill(Color.white.opacity(0.09)).frame(width: 1, height: 30).offset(x: x(h))
                         Text("\(Calendar.current.component(.hour, from: h)) h")
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
                             .fixedSize()
-                            .offset(x: x(h) + 3, y: 25)
+                            .offset(x: x(h) - 8, y: 34)
                     }
                     ForEach(eventos) { e in
                         let escolhido = e.id == cartoes.selecionado
-                        RoundedRectangle(cornerRadius: 1.5)
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
                             .fill(CoresDasCameras.cor(e.idDaCamera, em: modelo.cameras))
-                            .frame(width: max(3, CGFloat(e.gravacao.duracao / total) * w), height: escolhido ? 30 : 22)
-                            .overlay(RoundedRectangle(cornerRadius: 1.5).stroke(Color.primary, lineWidth: escolhido ? 1.5 : 0))
-                            .offset(x: x(e.inicio), y: escolhido ? -4 : 0)
+                            .frame(width: max(4, CGFloat(e.gravacao.duracao / total) * w), height: escolhido ? 34 : 18)
+                            .overlay(RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                .strokeBorder(Color.white, lineWidth: escolhido ? 1.5 : 0))
+                            .shadow(color: escolhido ? .black.opacity(0.5) : .clear, radius: 3)
+                            .offset(x: x(e.inicio), y: escolhido ? -2 : 6)
                     }
                 }
                 .contentShape(Rectangle())
@@ -179,9 +198,24 @@ private struct LinhaDoTempo: View {
                     }
                 }
             }
-            .frame(height: 40)
+            .frame(height: 50)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Linha do tempo: \(resumo(eventos))")
+        }
+    }
+
+    /// De que câmera é cada cor (só com todas as câmeras juntas).
+    @ViewBuilder private func legenda(_ eventos: [EventoDoCartao]) -> some View {
+        if cartoes.camera == nil {
+            let comMovimento = Set(eventos.map(\.idDaCamera))
+            HStack(spacing: 12) {
+                ForEach(modelo.cameras.filter { comMovimento.contains($0.id) }) { c in
+                    HStack(spacing: 5) {
+                        Circle().fill(CoresDasCameras.cor(c.id, em: modelo.cameras)).frame(width: 8, height: 8)
+                        Text(c.nome).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+            }
         }
     }
 
@@ -223,12 +257,16 @@ private struct GaleriaDeEventos: View {
         case .lendo:
             ProgressView("Procurando nas câmeras…").frame(maxWidth: .infinity, maxHeight: .infinity)
         case .erro(let m):
-            EstadoVazio(simbolo: "wifi.exclamationmark", titulo: "As câmeras não responderam", texto: m) {
+            ContentUnavailableView {
+                Label("As câmeras não responderam", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(m)
+            } actions: {
                 Button("Tentar de novo") { cartoes.recarregarEventos() }
             }
         case .pronto(let lista) where lista.isEmpty:
-            EstadoVazio(simbolo: "moon.zzz", titulo: "Nada gravado",
-                        texto: "Nenhum movimento ficou gravado no cartão nesse período.") { EmptyView() }
+            ContentUnavailableView("Nada gravado", systemImage: "moon.zzz",
+                                   description: Text("Nenhum movimento ficou gravado no cartão nesse período."))
         case .pronto(let lista):
             grade(lista)
         }
@@ -244,7 +282,7 @@ private struct GaleriaDeEventos: View {
                             .foregroundStyle(.orange)
                             .help(erro)
                     }
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 124, maximum: 200), spacing: 10)], alignment: .leading, spacing: 10) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 200), spacing: 10)], alignment: .leading, spacing: 10) {
                         ForEach(lista) { e in
                             CartaoDoEvento(evento: e, imagem: cartoes.fotos[e.id],
                                            cor: CoresDasCameras.cor(e.idDaCamera, em: modelo.cameras),
@@ -264,7 +302,6 @@ private struct GaleriaDeEventos: View {
             }
         }
     }
-
 }
 
 /// Um movimento na galeria: a foto do instante (as duas lentes, se a câmera tiver duas), a hora, a
@@ -276,53 +313,64 @@ private struct CartaoDoEvento: View {
     let mostrarCamera: Bool
     let escolhido: Bool
     let baixando: Double?
+    @State private var sobre = false
 
     var body: some View {
+        let forma = RoundedRectangle(cornerRadius: 10, style: .continuous)
         Color.black
             .aspectRatio(evento.duasLentes ? 640.0 / 720.0 : 16.0 / 9.0, contentMode: .fit)
             .overlay {
                 if let imagem {
                     Image(decorative: imagem, scale: 1).resizable().scaledToFill()
                 } else {
-                    Image(systemName: evento.foto == nil ? "video.fill" : "photo")
+                    Image(systemName: evento.foto == nil ? "film" : "photo")
                         .font(.title2)
                         .foregroundStyle(.white.opacity(0.15))
                 }
             }
             .overlay(alignment: .bottom) {
-                LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom).frame(height: 52)
+                LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom).frame(height: 56)
             }
             .overlay(alignment: .bottomLeading) {
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(FormatoDasGravacoes.hora(evento.inicio))
                         .font(.system(.subheadline, design: .rounded).weight(.semibold).monospacedDigit())
-                    HStack(spacing: 4) {
-                        if mostrarCamera {
+                    if mostrarCamera {
+                        HStack(spacing: 4) {
                             Circle().fill(cor).frame(width: 6, height: 6)
                             Text(evento.nomeDaCamera).lineLimit(1)
                         }
-                        Text(FormatoDasGravacoes.duracaoCurta(evento.gravacao.duracao)).monospacedDigit()
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.85))
                     }
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.8))
                 }
                 .foregroundStyle(.white)
-                .padding(7)
+                .padding(8)
             }
             .overlay(alignment: .topTrailing) {
-                if let baixando {
-                    ProgressView(value: baixando)
-                        .progressViewStyle(.circular)
-                        .controlSize(.mini)
-                        .padding(5)
-                        .background(.black.opacity(0.5), in: Circle())
-                        .padding(5)
+                Group {
+                    if let baixando {
+                        ProgressView(value: baixando)
+                            .progressViewStyle(.circular)
+                            .controlSize(.mini)
+                            .padding(4)
+                            .background(Tema.sobreVideo, in: Circle())
+                    } else {
+                        Text(FormatoDasGravacoes.duracaoCurta(evento.gravacao.duracao))
+                            .font(.caption2.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Tema.sobreVideo, in: Capsule())
+                    }
                 }
+                .padding(6)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(escolhido ? Color.accentColor : Color.white.opacity(0.06), lineWidth: escolhido ? 3 : 1))
-            .contentShape(Rectangle())
+            .clipShape(forma)
+            .overlay(forma.strokeBorder(escolhido ? Color.accentColor : Color.white.opacity(sobre ? 0.3 : 0.07),
+                                        lineWidth: escolhido ? 3 : 1))
+            .contentShape(forma)
+            .onHover { sobre = $0 }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(evento.nomeDaCamera), \(FormatoDasGravacoes.hora(evento.inicio)), \(GravacaoPorMovimento.duracao(evento.gravacao.duracao))")
             .accessibilityAddTraits(escolhido ? [.isButton, .isSelected] : .isButton)
@@ -367,9 +415,11 @@ private struct DetalheDoEvento: View {
                             Image(systemName: "play.fill")
                                 .font(.system(size: 30, weight: .semibold))
                                 .foregroundStyle(.white)
-                                .frame(width: 74, height: 74)
+                                .frame(width: 76, height: 76)
                                 .background(.black.opacity(0.55), in: Circle())
-                                .overlay(Circle().stroke(.white.opacity(0.8), lineWidth: 2))
+                                .overlay(Circle().strokeBorder(.white.opacity(0.85), lineWidth: 2))
+                                .shadow(color: .black.opacity(0.4), radius: 10)
+                                .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
                         .help("Assistir (espaço)")
@@ -377,7 +427,8 @@ private struct DetalheDoEvento: View {
                     }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Tema.raio, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Tema.raio, style: .continuous).strokeBorder(Tema.borda))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             if case .pronto(let estado) = cartoes.estados[e.idDaCamera] {
                 Label(FormatoDasGravacoes.cartao(estado), systemImage: "sdcard")
@@ -394,34 +445,59 @@ private struct DetalheDoEvento: View {
         Task { _ = await cartoes.assistir(e) }
     }
 
+    /// O que é o movimento e o que dá para fazer com ele; numa janela estreita, os botões descem.
     private func informacoes(_ e: EventoDoCartao) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        ViewThatFits(in: .horizontal) {
             HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 7) {
-                        Circle().fill(CoresDasCameras.cor(e.idDaCamera, em: modelo.cameras)).frame(width: 9, height: 9)
-                        Text(e.nomeDaCamera).font(.title3.weight(.semibold))
-                    }
-                    Text([e.inicio.formatted(.dateTime.weekday(.wide).day().month(.wide)) + ", " + FormatoDasGravacoes.hora(e.inicio),
-                          GravacaoPorMovimento.duracao(e.gravacao.duracao),
-                          ByteCountFormatter.string(fromByteCount: Int64(e.gravacao.bytes), countStyle: .file)].joined(separator: " · "))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                ControlGroup {
-                    Button { cartoes.selecionarMaisAntigo() } label: { Image(systemName: "chevron.left") }
-                        .help("Movimento anterior (←)")
-                        .accessibilityLabel("Movimento anterior")
-                    Button { cartoes.selecionarMaisNovo() } label: { Image(systemName: "chevron.right") }
-                        .help("Movimento seguinte (→)")
-                        .accessibilityLabel("Movimento seguinte")
-                }
-                .frame(width: 80)
-                Button { Task { await cartoes.guardar(e) } } label: { Label("Guardar no Mac", systemImage: "square.and.arrow.down") }
-                    .disabled(cartoes.baixando[e.id] != nil)
-                    .help("Guarda o vídeo em \(Plataforma.ondeFicamAsGravacoes)")
+                descricao(e)
+                Spacer(minLength: 8)
+                acoes(e)
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                descricao(e)
+                acoes(e)
             }
         }
+    }
+
+    private func descricao(_ e: EventoDoCartao) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 7) {
+                Circle().fill(CoresDasCameras.cor(e.idDaCamera, em: modelo.cameras)).frame(width: 9, height: 9)
+                Text(e.nomeDaCamera).font(.title3.weight(.semibold))
+                Text(FormatoDasGravacoes.hora(e.inicio))
+                    .font(.title3.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .lineLimit(1)
+            Text([e.inicio.formatted(.dateTime.weekday(.wide).day().month(.wide)),
+                  e.inicio.formatted(.relative(presentation: .named)),
+                  GravacaoPorMovimento.duracao(e.gravacao.duracao),
+                  ByteCountFormatter.string(fromByteCount: Int64(e.gravacao.bytes), countStyle: .file)].joined(separator: " · "))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+    }
+
+    private func acoes(_ e: EventoDoCartao) -> some View {
+        HStack(spacing: 8) {
+            ControlGroup {
+                Button { cartoes.selecionarMaisAntigo() } label: { Image(systemName: "chevron.left") }
+                    .help("Movimento anterior (←)")
+                    .accessibilityLabel("Movimento anterior")
+                Button { cartoes.selecionarMaisNovo() } label: { Image(systemName: "chevron.right") }
+                    .help("Movimento seguinte (→)")
+                    .accessibilityLabel("Movimento seguinte")
+            }
+            .frame(width: 80)
+            Button { modelo.selecionar(.camera(e.idDaCamera)) } label: { Label("Ao vivo", systemImage: "dot.radiowaves.left.and.right") }
+                .help("Ver \(e.nomeDaCamera) ao vivo agora")
+            Button { Task { await cartoes.guardar(e) } } label: { Label("Guardar no Mac", systemImage: "square.and.arrow.down") }
+                .disabled(cartoes.baixando[e.id] != nil)
+                .help("Guarda o vídeo em \(Plataforma.ondeFicamAsGravacoes)")
+        }
+        .fixedSize()
     }
 }
 
@@ -431,51 +507,53 @@ private struct EstadoDosCartoes: View {
     @ObservedObject var cartoes: CartoesDasCameras
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Label("Cartões das câmeras", systemImage: "sdcard").font(.title3.weight(.semibold))
-            Text("As câmeras gravam sozinhas no cartão de memória quando há movimento, com o som, mesmo com o Mac e o celular desligados. Quando o cartão enche, as gravações mais antigas dão lugar às novas.")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            ForEach(modelo.cameras) { c in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Circle().fill(CoresDasCameras.cor(c.id, em: modelo.cameras)).frame(width: 9, height: 9)
-                    Text(c.nome).font(.headline)
-                    Spacer()
-                    switch cartoes.estados[c.id] {
-                    case .pronto(let e): Text(FormatoDasGravacoes.cartao(e)).font(.callout).foregroundStyle(e.gravaPorMovimento == false || !e.temCartao ? .orange : .secondary)
-                    case .erro: Text("não respondeu").font(.callout).foregroundStyle(.orange)
-                    default: Text("lendo…").font(.callout).foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Label("Cartões das câmeras", systemImage: "sdcard").font(.title3.weight(.semibold))
+                Text("As câmeras gravam sozinhas no cartão de memória quando há movimento, com o som, mesmo com o Mac e o celular desligados. Quando o cartão enche, as gravações mais antigas dão lugar às novas.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(modelo.cameras) { c in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Circle().fill(CoresDasCameras.cor(c.id, em: modelo.cameras)).frame(width: 9, height: 9)
+                            Text(c.nome).font(.headline)
+                            Spacer()
+                            switch cartoes.estados[c.id] {
+                            case .pronto(let e) where !e.temCartao:
+                                Text("sem cartão de memória").font(.callout).foregroundStyle(.orange)
+                            case .pronto(let e):
+                                Text(e.gravaPorMovimento == false ? "não grava por movimento" : "grava por movimento")
+                                    .font(.callout)
+                                    .foregroundStyle(e.gravaPorMovimento == false ? Color.orange : Color.secondary)
+                            case .erro:
+                                Text("não respondeu").font(.callout).foregroundStyle(.orange)
+                            default:
+                                ProgressView().controlSize(.small)
+                            }
+                        }
+                        if case .pronto(let e) = cartoes.estados[c.id], let livre = e.livreMB, let total = e.totalMB, total > 0 {
+                            ProgressView(value: Double(max(0, total - livre)), total: Double(total))
+                                .tint(livre * 10 < total ? .orange : .accentColor)
+                            Text("\(FormatoDasGravacoes.tamanho(mb: livre)) livres de \(FormatoDasGravacoes.tamanho(mb: total))"
+                                 + (e.detectaPessoas == true ? " · só pessoas" : "") + (e.comSom == true ? " · com som" : ""))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .cartao()
                 }
+                HStack(spacing: 4) {
+                    Text("O que cada câmera grava se ajusta no app do fabricante (iCSee, XMEye). Para o Mac gravar também uma cópia:")
+                    SettingsLink { Text("Ajustes > Gravação no Mac") }.buttonStyle(.link)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            Spacer()
-            HStack(spacing: 4) {
-                Text("O que cada câmera grava se ajusta no app do fabricante (iCSee, XMEye). Para o Mac gravar também uma cópia:")
-                SettingsLink { Text("Ajustes > Gravação no Mac") }.buttonStyle(.link)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .padding(28)
+            .frame(maxWidth: 600, alignment: .topLeading)
         }
-        .padding(28)
-        .frame(maxWidth: 560, maxHeight: .infinity, alignment: .topLeading)
-    }
-}
-
-private struct EstadoVazio<Acao: View>: View {
-    let simbolo: String
-    let titulo: String
-    let texto: String
-    @ViewBuilder let acao: () -> Acao
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: simbolo).font(.system(size: 38)).foregroundStyle(.secondary)
-            Text(titulo).font(.title3.weight(.semibold))
-            Text(texto).multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 300)
-            acao()
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
