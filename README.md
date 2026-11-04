@@ -14,6 +14,11 @@ do fabricante.
 - Vídeo ao vivo das câmeras (H.264 e H.265, decodificados por hardware) pelo RTSP.
 - Câmeras com duas lentes empilhadas no mesmo quadro: mostra a lente móvel e a fixa.
 - Movimento (PTZ) por botões e setas do teclado, zoom digital, posições salvas.
+- Posição de descanso: escolhe-se uma das posições salvas e a câmera fica parada nela; com o rastreio
+  automático ligado, ela segue o movimento e volta para lá alguns segundos depois de ele acabar (5 s a
+  5 min, à escolha). O app grava a posição como o ponto de vigia da câmera (a posição 100 do firmware,
+  a "posição de guarda" do iCSee), então vale com o Mac e o celular desligados. Sem ponto de vigia, a
+  câmera fica onde o rastreio a largou.
 - Luz branca (automática, ligada, desligada) e rastreio automático.
 - Ouvir a câmera, falar por ela ao vivo, tocar sons prontos e texto falado.
 - Foto da lente atual.
@@ -182,6 +187,14 @@ swift run camspike cartao --camera NOME --horas 12 --baixar ultimo --saida grava
 swift run camspike cartao --camera NOME --horas 1 --baixar 0 --trecho 20 --a-partir 30 --saida trecho.mp4
 swift run camspike cartao --camera NOME --horas 24 --cobertura
 swift run camspike cartao --camera NOME --continua sim
+```
+
+E para fazer de uma posição salva o lugar onde a câmera descansa (e em quantos segundos ela volta para lá
+depois do movimento):
+
+```sh
+swift run camspike posicao listar --camera NOME
+swift run camspike rastreio --camera NOME --descanso 2 --volta 10
 ```
 
 Para saber se uma câmera está travada (aceita a conexão e não responde) ou sumiu, e acompanhar quando

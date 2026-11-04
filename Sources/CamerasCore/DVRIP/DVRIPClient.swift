@@ -200,12 +200,22 @@ public final class DVRIPClient: @unchecked Sendable {
         return ((c["Enable"] as? NSNumber)?.boolValue ?? false, (c["ReturnTime"] as? NSNumber)?.intValue)
     }
 
-    /// Liga ou desliga o rastreio automático e confirma lendo de volta.
-    public func definirRastreio(_ ligado: Bool) throws {
+    /// Liga ou desliga o rastreio automático (e, se dito, muda em quantos segundos sem movimento a câmera volta ao
+    /// ponto de vigia) e confirma lendo de volta.
+    public func definirRastreio(_ ligado: Bool, voltaEmSegundos: Int? = nil) throws {
         var atual = try configuracao("Detect.DetectTrack")
-        atual["Enable"] = ligado
+        // umas câmeras guardam o "ligado" como true/false, outras como 1/0: grava do jeito que veio
+        if let antes = atual["Enable"] as? NSNumber, CFGetTypeID(antes) != CFBooleanGetTypeID() {
+            atual["Enable"] = ligado ? 1 : 0
+        } else {
+            atual["Enable"] = ligado
+        }
+        if let voltaEmSegundos { atual["ReturnTime"] = voltaEmSegundos }
         try gravarConfiguracao("Detect.DetectTrack", atual)
-        guard try rastreio().ligado == ligado else { throw DVRIPErro("a câmera aceitou, mas o rastreio não mudou") }
+        let r = try rastreio()
+        guard r.ligado == ligado, voltaEmSegundos == nil || r.voltaEmSegundos == voltaEmSegundos else {
+            throw DVRIPErro("a câmera aceitou, mas o rastreio não mudou")
+        }
     }
 
     // MARK: - Fala

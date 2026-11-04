@@ -23,6 +23,7 @@ func uso() -> Never {
       camspike posicao listar|salvar|ir|apagar --camera NOME [--nome N] [--token T]
       camspike luz --camera NOME --modo automatico|ligada|desligada
       camspike rastreio --camera NOME --ligado sim|nao
+      camspike rastreio --camera NOME --descanso N [--volta SEGUNDOS]
 
     """, stderr)
     exit(2)
@@ -411,9 +412,19 @@ func comandoLuz(_ opcoes: Opcoes) {
     catch { print("falhou: \(error)"); exit(1) }
 }
 
+/// Liga e desliga o rastreio; com `--descanso N`, faz da posição salva N o lugar onde a câmera descansa (o ponto
+/// de vigia) e volta `--volta S` segundos depois de perder o movimento.
 func comandoRastreio(_ opcoes: Opcoes) {
     let camera = cameraEscolhida(opcoes)
-    guard let v = opcoes.texto("--ligado"), ["sim", "nao"].contains(v) else { fputs("use --ligado sim|nao\n", stderr); exit(2) }
+    if let token = opcoes.texto("--descanso") {
+        let volta = opcoes.inteiro("--volta", padrao: 10)
+        do {
+            try ControleDeCamera(camera: camera).definirDescanso(em: token, voltaEmSegundos: volta)
+            print("a câmera descansa na posição \(token) e volta para lá \(volta) s depois do movimento (confirmado lendo de volta)")
+        } catch { print("falhou: \(error)"); exit(1) }
+        return
+    }
+    guard let v = opcoes.texto("--ligado"), ["sim", "nao"].contains(v) else { fputs("use --ligado sim|nao ou --descanso N [--volta S]\n", stderr); exit(2) }
     do { try ControleDeCamera(camera: camera).definirRastreio(v == "sim"); print("rastreio \(v == "sim" ? "ligado" : "desligado") (confirmado lendo de volta)") }
     catch { print("falhou: \(error)"); exit(1) }
 }

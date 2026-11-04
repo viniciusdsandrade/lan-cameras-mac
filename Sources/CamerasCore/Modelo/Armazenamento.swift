@@ -105,6 +105,27 @@ public final class ArmazenamentoDeCameras: @unchecked Sendable {
         return (try? JSONDecoder().decode([String: [String]].self, from: d)) ?? [:]
     }
 
+    // MARK: - Posição de descanso (a posição salva que o app gravou como ponto de vigia de cada câmera)
+
+    private var arquivoDeDescanso: URL { pasta.appendingPathComponent("descanso.json") }
+
+    public func descanso(camera id: String) -> String? {
+        trava.withLock { lerDescansos()[id] }
+    }
+
+    public func registrarDescanso(_ token: String, camera id: String) throws {
+        try trava.withLock {
+            var todos = lerDescansos()
+            todos[id] = token
+            try gravar(todos, em: arquivoDeDescanso)
+        }
+    }
+
+    private func lerDescansos() -> [String: String] {
+        guard let d = try? Data(contentsOf: arquivoDeDescanso) else { return [:] }
+        return (try? JSONDecoder().decode([String: String].self, from: d)) ?? [:]
+    }
+
     // MARK: - Ajustes da gravação por movimento (sem segredos)
 
     private var arquivoDeGravacao: URL { pasta.appendingPathComponent("gravacao.json") }

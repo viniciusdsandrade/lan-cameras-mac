@@ -23,6 +23,8 @@ public final class SessaoDaCamera: ObservableObject {
     @Published public private(set) var estado: EstadoDaCamera?
     @Published public private(set) var ocupadas: Set<String> = []
     @Published public private(set) var presetsDoApp: Set<String> = []
+    /// A posição salva em que a câmera descansa (o ponto de vigia que este app gravou nela), se gravou.
+    @Published public private(set) var descanso: String?
     @Published public private(set) var direcoesAtivas: Set<Direcao> = []
     @Published public private(set) var ouvindo = false
     @Published public private(set) var falandoAoVivo = false
@@ -48,6 +50,7 @@ public final class SessaoDaCamera: ObservableObject {
         fala = GerenteDeFala(camera: camera)
         ganho.valor = Self.ganho(de: modelo.volume)
         presetsDoApp = controle.presetsCriadosPeloApp()
+        descanso = controle.descanso()
         let escuta = self.escuta
         video.definirOuvinteDeAudio { escuta.empurrar($0) }
         modelo.acompanhar(video)
@@ -134,6 +137,7 @@ public final class SessaoDaCamera: ObservableObject {
                 rastreioPedido = nil
             }
             ocupadas.remove(chave)
+            descanso = controle.descanso()
             await atualizarEstado()
         }
     }
@@ -198,6 +202,36 @@ public final class SessaoDaCamera: ObservableObject {
         rastreioPedido = ligado
         let c = controle
         agir("rastreio", sucesso: ligado ? "Rastreio ligado" : "Rastreio desligado") { try c.definirRastreio(ligado) }
+    }
+
+    /// As posições salvas que podem ser o lugar de descanso (as do firmware, como o próprio ponto de vigia, não).
+    public var posicoesParaDescanso: [PresetDaCamera] { (estado?.presets ?? []).filter { !$0.doFirmware } }
+
+    /// Os tempos de volta oferecidos na tela, em segundos.
+    public static let temposDeVolta = [5, 10, 30, 60, 300]
+
+    /// Faz de `p` o lugar onde a câmera descansa e para onde o rastreio a devolve, `voltaEmSegundos` depois de
+    /// perder o movimento (sem dizer: o tempo que ela já usa, se for de até 1 min, ou 10 s, para voltar logo).
+    /// A câmera vai até lá enquanto isso.
+    public func definirDescanso(_ p: PresetDaCamera, voltaEmSegundos: Int? = nil) {
+        let voltaEmSegundos = voltaEmSegundos ?? estado?.rastreioVoltaEmSegundos.flatMap { $0 <= 60 ? $0 : nil } ?? 10
+        let c = controle
+        agir("descanso", sucesso: "\(camera.nome) agora descansa em \(p.nome) e volta para lá \(Self.tempo(voltaEmSegundos)) depois do movimento") {
+            try c.definirDescanso(em: p.token, voltaEmSegundos: voltaEmSegundos)
+        }
+    }
+
+    /// Em quantos segundos sem movimento a câmera volta à posição de descanso.
+    public func definirVolta(emSegundos segundos: Int) {
+        let c = controle
+        agir("descanso", sucesso: "\(camera.nome) volta à posição de descanso \(Self.tempo(segundos)) depois do movimento") {
+            try c.definirVolta(emSegundos: segundos)
+        }
+    }
+
+    /// "5 s", "1 min", "30 min".
+    public static func tempo(_ segundos: Int) -> String {
+        segundos < 60 ? "\(segundos) s" : "\(segundos / 60) min"
     }
 
     public static func nome(da modo: ModoDaLuz) -> String {

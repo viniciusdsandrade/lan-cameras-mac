@@ -258,4 +258,116 @@ final class ControleTests: XCTestCase {
         XCTAssertEqual(e.avisos.count, 1)
         XCTAssertFalse(dvrip.quadros.contains { $0.id == 1040 }, "ler o estado nunca grava nada")
     }
+
+    // MARK: - Posição de descanso
+
+    /// Uma câmera falsa: o ONVIF vai à posição e diz que o motor anda por algumas leituras; o DVRIP guarda o
+    /// rastreio que recebe e as posições gravadas.
+    private final class CameraDoDescanso: @unchecked Sendable {
+        private let trava = NSLock()
+        private var rastreio: [String: Any] = ["Enable": 1, "ReturnTime": 300, "Sensitivity": 2]
+        private var _gravadas: [Int] = []
+        private var leituras = 0
+        var leiturasAndando = 2
+        var sempreAndando = false
+
+        var gravadas: [Int] { trava.withLock { _gravadas } }
+        var rastreioAtual: [String: Any] { trava.withLock { rastreio } }
+
+        func onvif() throws -> ServidorHTTPFalso {
+            try ServidorHTTPFalso { [self] req in
+                if req.corpo.contains("GetStatus") {
+                    let andando = trava.withLock { () -> Bool in
+                        leituras += 1
+                        return sempreAndando || leituras <= leiturasAndando
+                    }
+                    return .init(corpo: "<s:Envelope xmlns:s=\"x\"><s:Body><tptz:GetStatusResponse xmlns:tptz=\"p\" xmlns:tt=\"t\">"
+                                 + "<tptz:PTZStatus><tt:MoveStatus><tt:PanTilt>\(andando ? "MOVING" : "IDLE")</tt:PanTilt>"
+                                 + "<tt:Zoom>IDLE</tt:Zoom></tt:MoveStatus></tptz:PTZStatus></tptz:GetStatusResponse></s:Body></s:Envelope>")
+                }
+                return .init(corpo: "<s:Envelope xmlns:s=\"x\"><s:Body><ok/></s:Body></s:Envelope>")
+            }
+        }
+
+        func dvrip() throws -> ServidorDVRIPFalso {
+            try ServidorDVRIPFalso { [self] id, corpo in
+                let nome = corpo["Name"] as? String ?? ""
+                switch id {
+                case 1000: return ["Ret": 100, "SessionID": "0x00000042"]
+                case 1400:
+                    let parametro = (corpo["OPPTZControl"] as? [String: Any])?["Parameter"] as? [String: Any]
+                    if (corpo["OPPTZControl"] as? [String: Any])?["Command"] as? String == "SetPreset", let n = parametro?["Preset"] as? Int {
+                        trava.withLock { _gravadas.append(n) }
+                    }
+                    return ["Ret": 100, "Name": nome]
+                case 1042:
+                    if nome == "Uart.PTZPreset" {
+                        return ["Ret": 100, "Name": nome, nome: [[["Id": 0]] + trava.withLock { _gravadas }.map { ["Id": $0, "PresetName": ""] }]]
+                    }
+                    return nome == "Detect.DetectTrack" ? ["Ret": 100, "Name": nome, nome: trava.withLock { rastreio }] : ["Ret": 607]
+                case 1040:
+                    if let novo = corpo[nome] as? [String: Any] { trava.withLock { rastreio = novo } }
+                    return ["Ret": 100, "Name": nome]
+                default: return nil
+                }
+            }
+        }
+    }
+
+    private func controleDoDescanso(_ cam: CameraDoDescanso) throws -> (ControleDeCamera, ServidorHTTPFalso, ServidorDVRIPFalso) {
+        ControleDeCamera.esperaParaComecar = 0.05
+        ControleDeCamera.esperaSemOMotor = 0.1
+        let onvif = try cam.onvif(), dvrip = try cam.dvrip()
+        let c = ControleDeCamera(camera: camera(), armazenamento: ArmazenamentoDeCameras(pasta: pastaTemporaria()),
+                                 portaOnvif: onvif.porta, portaDVRIP: dvrip.porta)
+        return (c, onvif, dvrip)
+    }
+
+    func testDescansoVaiAtePosicaoEsperaOMotorPararEGravaOPontoDeVigia() throws {
+        let cam = CameraDoDescanso()
+        let (c, onvif, _) = try controleDoDescanso(cam)
+        try c.definirDescanso(em: "3", voltaEmSegundos: 10)
+        XCTAssertTrue(onvif.requisicoes.contains { $0.corpo.contains("GotoPreset") && $0.corpo.contains(">3<") })
+        XCTAssertGreaterThanOrEqual(contar(onvif, "GetStatus"), 4, "duas leituras andando e duas paradas antes de gravar a vista")
+        XCTAssertEqual(cam.gravadas, [DVRIPClient.posicaoDeVigia], "a vista vira a posição 100, o ponto de vigia do firmware")
+        XCTAssertEqual(cam.rastreioAtual["ReturnTime"] as? Int, 10)
+        let ligado = try XCTUnwrap(cam.rastreioAtual["Enable"] as? NSNumber)
+        XCTAssertEqual(ligado.intValue, 1)
+        XCTAssertNotEqual(CFGetTypeID(ligado), CFBooleanGetTypeID(), "do jeito que a câmera guardava: 1, e não true")
+        XCTAssertEqual(c.descanso(), "3")
+        try c.definirVolta(emSegundos: 30)
+        XCTAssertEqual(cam.rastreioAtual["ReturnTime"] as? Int, 30)
+        XCTAssertEqual(cam.gravadas.count, 1, "mudar o tempo não grava a vista de novo")
+    }
+
+    func testCameraQueSempreDizParadoEsperaOTempoDeQualquerVolta() throws {
+        let cam = CameraDoDescanso()
+        cam.leiturasAndando = 0                                       // como as XiongMai: "IDLE" até andando
+        let (c, _, _) = try controleDoDescanso(cam)
+        ControleDeCamera.esperaSemOMotor = 0.6
+        let inicio = Date()
+        try c.definirDescanso(em: "3", voltaEmSegundos: 10)
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(inicio), 0.6, "não confia no \"parado\" de quem nunca disse \"andando\"")
+        XCTAssertEqual(cam.gravadas, [DVRIPClient.posicaoDeVigia])
+    }
+
+    func testDescansoNaoGravaAVistaSeOMotorNaoPara() throws {
+        let cam = CameraDoDescanso()
+        cam.sempreAndando = true
+        let (c, _, _) = try controleDoDescanso(cam)
+        XCTAssertThrowsError(try c.definirDescanso(em: "3", voltaEmSegundos: 10, esperarAte: 1))
+        XCTAssertEqual(cam.gravadas, [], "gravar no meio do caminho deixaria a câmera descansando no lugar errado")
+        XCTAssertNil(c.descanso())
+        XCTAssertEqual(cam.rastreioAtual["ReturnTime"] as? Int, 300)
+    }
+
+    func testPosicoesDoFirmwareNaoViramDescanso() throws {
+        let cam = CameraDoDescanso()
+        let (c, onvif, _) = try controleDoDescanso(cam)
+        for token in ["100", "99", "250", "x"] {
+            XCTAssertThrowsError(try c.definirDescanso(em: token, voltaEmSegundos: 10), token)
+        }
+        XCTAssertEqual(onvif.requisicoes.count, 0, "nem chega a mover a câmera")
+    }
 }
+

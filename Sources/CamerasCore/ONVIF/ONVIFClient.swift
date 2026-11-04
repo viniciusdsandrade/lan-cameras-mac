@@ -23,6 +23,17 @@ public struct CredenciaisDaCamera: Sendable, Equatable {
 public struct PresetDaCamera: Sendable, Equatable {
     public let token: String
     public let nome: String
+
+    public init(token: String, nome: String) {
+        self.token = token
+        self.nome = nome
+    }
+
+    /// Uma das posições que o firmware usa para si, como o ponto de vigia (a 100).
+    public var doFirmware: Bool { Int(token).map { DVRIPClient.posicoesDoFirmware.contains($0) } ?? false }
+
+    /// Como aparece na tela: a posição 100 é o ponto de vigia, onde a câmera descansa.
+    public var nomeNaTela: String { token == String(DVRIPClient.posicaoDeVigia) ? "Ponto de vigia (descanso)" : nome }
 }
 
 enum ONVIFSeguranca {

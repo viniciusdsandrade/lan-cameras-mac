@@ -20,7 +20,7 @@ struct AjudaView: View {
                     bloco("plus.magnifyingglass", .indigo, "Zoom",
                           "Roda do mouse ou pinça no trackpad aproximam no ponto do cursor; arraste para andar pela imagem; duplo clique volta ao normal. No teclado: + e − dão zoom, 0 reinicia. O zoom é digital: as câmeras não têm zoom óptico.")
                     bloco("scope", .orange, "Rastreio automático",
-                          "Com o rastreio ligado, a câmera segue o movimento e depois volta sozinha ao ponto de vigia. Por isso um movimento manual \"se desfaz\": desligue o rastreio no painel se quiser que ela fique onde você deixou.")
+                          "Com o rastreio ligado, a câmera segue o movimento e depois volta sozinha ao ponto de vigia. Em \"Descansa em\", no painel, escolha uma das posições salvas para ser esse lugar, e em \"Volta em\", quanto tempo depois do movimento ela volta: fica gravado na câmera e vale com o Mac desligado. Por isso um movimento manual \"se desfaz\": desligue o rastreio no painel se quiser que ela fique onde você deixou.")
                     bloco("mappin.and.ellipse", .pink, "Posições salvas",
                           "\"Salvar a posição atual\" guarda para onde a câmera aponta; clicar numa posição leva a câmera até ela. O app só apaga as posições que ele mesmo criou; as que já vinham na câmera ficam intactas.")
                     bloco("speaker.wave.2.fill", .green, "Som",

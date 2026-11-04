@@ -108,7 +108,7 @@ struct PainelDeControles: View {
             }
             VStack(spacing: 2) {
                 ForEach(lista, id: \.token) { p in
-                    LinhaDePosicao(posicao: p, indo: sessao.ocupadas.contains("preset-\(p.token)"),
+                    LinhaDePosicao(posicao: p, descanso: p.token == sessao.descanso, indo: sessao.ocupadas.contains("preset-\(p.token)"),
                                    podeApagar: sessao.presetsDoApp.contains(p.token),
                                    apagandoAgora: sessao.ocupadas.contains("apagar-\(p.token)"),
                                    ir: { sessao.irPara(p) }, apagar: { apagando = p })
@@ -148,9 +148,45 @@ struct PainelDeControles: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .disabled(sessao.estado?.rastreioLigado == nil || sessao.ocupadas.contains("rastreio"))
-            if sessao.estado?.rastreioLigado == true, let s = sessao.estado?.rastreioVoltaEmSegundos {
-                Nota("Com o rastreio ligado a câmera segue o movimento e volta sozinha ao ponto de vigia depois de \(s) s: o movimento manual \"se desfaz\".")
+            descanso
+        }
+    }
+
+    /// Onde a câmera fica parada e em quanto tempo ela volta para lá depois de seguir um movimento: o ponto de
+    /// vigia, gravado na própria câmera (vale com o Mac desligado).
+    @ViewBuilder private var descanso: some View {
+        let posicoes = sessao.posicoesParaDescanso
+        let volta = sessao.estado?.rastreioVoltaEmSegundos
+        let mudando = sessao.ocupadas.contains("descanso")
+        LinhaDeAjuste(rotulo: "Descansa em") {
+            Picker("Descansa em", selection: Binding(
+                get: { sessao.descanso },
+                set: { token in if let p = posicoes.first(where: { $0.token == token }) { sessao.definirDescanso(p) } }
+            )) {
+                if sessao.descanso == nil { Text("Escolha uma posição").tag(String?.none) }
+                ForEach(posicoes, id: \.token) { p in Text(p.nome).tag(Optional(p.token)) }
             }
+            .labelsHidden()
+            .disabled(posicoes.isEmpty || mudando || sessao.estado == nil)
+        }
+        LinhaDeAjuste(rotulo: "Volta em") {
+            Picker("Volta em", selection: Binding(
+                get: { volta },
+                set: { if let s = $0 { sessao.definirVolta(emSegundos: s) } }
+            )) {
+                if let v = volta, !SessaoDaCamera.temposDeVolta.contains(v) { Text(SessaoDaCamera.tempo(v)).tag(Optional(v)) }
+                ForEach(SessaoDaCamera.temposDeVolta, id: \.self) { s in Text(SessaoDaCamera.tempo(s)).tag(Optional(s)) }
+            }
+            .labelsHidden()
+            .disabled(volta == nil || mudando)
+        }
+        if mudando {
+            Nota("Indo até a posição e gravando-a como o ponto de vigia da câmera…")
+        } else if posicoes.isEmpty {
+            Nota("Salve uma posição acima para escolher onde a câmera descansa.")
+        } else {
+            Nota("Sem movimento, a câmera fica parada na posição escolhida; quando o rastreio segue alguém, ela volta para lá "
+                 + "\(volta.map { SessaoDaCamera.tempo($0) } ?? "um tempo") depois. Fica gravado na câmera: vale com o Mac desligado.")
         }
     }
 
@@ -227,9 +263,10 @@ struct PainelDeControles: View {
     }
 }
 
-/// Uma posição salva: clicar vai até ela; as criadas por este app têm a lixeira.
+/// Uma posição salva: clicar vai até ela; as criadas por este app têm a lixeira. A de descanso tem a marca.
 private struct LinhaDePosicao: View {
     let posicao: PresetDaCamera
+    let descanso: Bool
     let indo: Bool
     let podeApagar: Bool
     let apagandoAgora: Bool
@@ -241,8 +278,13 @@ private struct LinhaDePosicao: View {
         HStack(spacing: 8) {
             Button(action: ir) {
                 HStack(spacing: 8) {
-                    Image(systemName: "scope").foregroundStyle(.secondary)
-                    Text(posicao.nome).lineLimit(1)
+                    Image(systemName: posicao.doFirmware ? "house" : "scope").foregroundStyle(.secondary)
+                    Text(posicao.nomeNaTela).lineLimit(1)
+                    if descanso {
+                        Text("descanso").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().strokeBorder(Tema.borda))
+                    }
                     Spacer(minLength: 4)
                     if indo {
                         ProgressView().controlSize(.small)
@@ -255,8 +297,8 @@ private struct LinhaDePosicao: View {
             }
             .buttonStyle(.plain)
             .disabled(indo)
-            .help("Ir para \(posicao.nome)")
-            .accessibilityLabel("Ir para a posição \(posicao.nome)")
+            .help("Ir para \(posicao.nomeNaTela)")
+            .accessibilityLabel("Ir para a posição \(posicao.nomeNaTela)\(descanso ? ", onde a câmera descansa" : "")")
             if podeApagar {
                 Button(action: apagar) { Image(systemName: "trash") }
                     .buttonStyle(.borderless)

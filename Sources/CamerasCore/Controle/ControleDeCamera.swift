@@ -68,6 +68,69 @@ public final class ControleDeCamera: Sendable {
         try comDVRIP { try $0.definirRastreio(ligado) }
     }
 
+    // MARK: - Posição de descanso
+
+    /// Faz de uma posição salva o lugar onde a câmera descansa: ela fica parada lá e, com o rastreio ligado, volta
+    /// para lá `voltaEmSegundos` depois de perder o movimento. Vai até a posição, espera o motor parar, grava a
+    /// vista como o ponto de vigia (a posição 100 do firmware) e liga o rastreio com esse tempo de volta. Fica
+    /// gravado na câmera: vale com o Mac e o celular desligados.
+    public func definirDescanso(em token: String, voltaEmSegundos: Int, esperarAte segundos: TimeInterval = 15) throws {
+        guard let numero = Int(token), !DVRIPClient.posicoesDoFirmware.contains(numero) else {
+            throw ControleErro("essa posição é da própria câmera; escolha uma das salvas")
+        }
+        try onvif.irParaPreset(token)
+        try esperarParar(ate: segundos)
+        try comDVRIP { d in
+            try d.salvarPosicao(DVRIPClient.posicaoDeVigia)
+            // confere na lista de posições, quando a câmera deixa ler
+            if let salvas = try? d.posicoesSalvas(), !salvas.contains(DVRIPClient.posicaoDeVigia) {
+                throw ControleErro("a câmera aceitou, mas não guardou o ponto de vigia")
+            }
+            try d.definirRastreio(true, voltaEmSegundos: voltaEmSegundos)
+        }
+        try armazenamento.registrarDescanso(token, camera: camera.id)
+    }
+
+    /// Muda só em quantos segundos sem movimento a câmera volta à posição de descanso (o rastreio fica ligado).
+    public func definirVolta(emSegundos segundos: Int) throws {
+        try comDVRIP { try $0.definirRastreio(true, voltaEmSegundos: segundos) }
+    }
+
+    /// A posição salva que este app gravou como o lugar de descanso da câmera, se gravou.
+    public func descanso() -> String? { armazenamento.descanso(camera: camera.id) }
+
+    /// Espera o motor parar: o firmware grava como ponto de vigia a vista em que a câmera estiver. As XiongMai
+    /// respondem o estado do motor (ONVIF `GetStatus`), mas sempre "parado", mesmo andando: só depois de uma
+    /// leitura "andando" vale esperar duas "parado" seguidas. Sem isso, espera o bastante para qualquer volta.
+    private func esperarParar(ate segundos: TimeInterval) throws {
+        let inicio = Date()
+        let limite = inicio.addingTimeInterval(max(segundos, Self.esperaSemOMotor))
+        Thread.sleep(forTimeInterval: Self.esperaParaComecar)        // o motor leva um instante para começar a andar
+        var viuAndando = false
+        var paradas = 0
+        while Date() < limite {
+            guard let andando = try? onvif.movendo() else { break }   // a câmera não informa o motor
+            if andando {
+                viuAndando = true
+                paradas = 0
+            } else if viuAndando {
+                paradas += 1
+                if paradas >= 2 { return }
+            } else if Date().timeIntervalSince(inicio) >= Self.esperaSemOMotor {
+                return                                                // nunca disse que andava: já deu tempo de sobra
+            }
+            Thread.sleep(forTimeInterval: 0.4)
+        }
+        if viuAndando { throw ControleErro("a câmera não terminou de ir até a posição") }
+        let falta = Self.esperaSemOMotor - Date().timeIntervalSince(inicio)
+        if falta > 0 { Thread.sleep(forTimeInterval: falta) }
+    }
+
+    /// Os testes encurtam as esperas. `esperaSemOMotor`: o bastante para a câmera dar a maior volta até uma posição
+    /// (o vídeo mostra a câmera andando uns 2 s depois do pedido).
+    nonisolated(unsafe) static var esperaParaComecar: TimeInterval = 1.5
+    nonisolated(unsafe) static var esperaSemOMotor: TimeInterval = 10
+
     public func pararMovimento() throws { try onvif.parar() }
 
     // MARK: - Posições salvas
