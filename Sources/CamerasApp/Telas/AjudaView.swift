@@ -26,7 +26,7 @@ struct AjudaView: View {
                     bloco("speaker.wave.2.fill", .green, "Som",
                           "\"Ouvir\", na barra embaixo do vídeo, liga o som da câmera (tecla M). \"Falar\" usa o microfone do Mac e a câmera repete no alto-falante dela; enquanto você fala o som da câmera fica mudo para não dar eco. No painel há sons prontos, texto falado e o volume, que começa em 30%: o alto-falante é alto.")
                     bloco("film.stack", .purple, "Gravações",
-                          "As câmeras gravam sozinhas no cartão de memória quando há movimento, com o som, mesmo com o Mac e o celular desligados. Em Gravações (na barra lateral, ou ⇧⌘R), escolha a noite e a câmera: cada movimento aparece com a foto do instante, e a linha do tempo mostra a noite inteira. Clique num movimento para vê-lo; ▶ (ou espaço) baixa o vídeo do cartão e toca aqui mesmo; ← e → passam de um para outro; \"Guardar no Mac\" copia o vídeo para Filmes > Câmeras de Casa.")
+                          "As câmeras gravam sozinhas no cartão de memória, com o som, mesmo com o Mac e o celular desligados: quando há movimento ou, ligando \"Gravar o tempo todo\" nos cartões (o botão do cartão na barra), sem parar. Quando o cartão enche, as gravações mais antigas dão lugar às novas. Em Gravações (na barra lateral, ou ⇧⌘R), escolha o dia: a linha do tempo mostra uma faixa por câmera, com o que ela gravou, e a lista à esquerda conta o dia por hora, em períodos de atividade (os movimentos seguidos de uma câmera, com até 5 minutos entre eles, juntos numa linha, com o começo, o fim e quantos movimentos teve). Clique numa faixa ou num período para assistir dali em diante, sem parar, como uma fita: espaço toca e pausa, ← e → vão ao período anterior e ao seguinte, ⇧← e ⇧→ andam 10 s, e a régua embaixo do vídeo (os 20 minutos em volta) leva a qualquer momento com um clique ou arrastando: o vídeo acompanha o arrasto, na hora no que já foi baixado (os últimos 10 minutos e o minuto e meio à frente) e, fora disso, com a imagem de cada instante, que a câmera manda em 0,5 a 3 s. A velocidade vai até 8×. \"Guardar este movimento\" copia o vídeo do movimento que está tocando para Filmes > Câmeras de Casa.")
                     bloco("record.circle", .red, "Gravação no Mac",
                           "Em Ajustes (⌘,), o Mac também pode gravar uma cópia sempre que algo se mexe na imagem, começando uns segundos antes e seguindo enquanto houver movimento. Por padrão só à noite (das 18 h às 6 h). Segue com a janela minimizada ou fechada e com a tela apagada; o Mac não dorme sozinho enquanto vigia, mas para de gravar se dormir pela tampa ou se o app for encerrado. Enquanto grava, a câmera mostra o selo REC.")
                     bloco("key.fill", .yellow, "Senha das câmeras",
@@ -74,7 +74,8 @@ struct AjudaView: View {
                 linha(["⇧", "⌘", "."], "Parar o movimento de todas")
                 linha(["⇧", "⌘", "P"], "Tirar foto")
                 linha(["⇧", "⌘", "R"], "Gravações")
-                linha(["←", "→"], "Movimento anterior e seguinte (em Gravações)")
+                linha(["←", "→"], "Período anterior e seguinte (em Gravações)")
+                linha(["⇧", "←", "→"], "10 s para trás e para a frente (em Gravações)")
                 linha(["espaço"], "Tocar e pausar (em Gravações)")
                 linha(["⌃", "⌘", "S"], "Mostrar ou esconder a barra lateral")
                 linha(["⌘", ","], "Ajustes (gravação no Mac)")

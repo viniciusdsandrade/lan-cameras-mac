@@ -190,6 +190,8 @@ final class CartaoDaCameraTests: XCTestCase {
         XCTAssertEqual(e.detectaPessoas, true)
         XCTAssertEqual(e.comSom, true)
         XCTAssertEqual(e.sobrescreve, true)
+        XCTAssertEqual(e.gravaSempre, false, "por movimento e alarme, sem a contínua")
+        XCTAssertEqual(e.desde, data("2026-10-24 01:00:00"), "a gravação mais antiga do cartão")
     }
 
     func testCameraSemCartaoOuSemGravarPorMovimento() throws {
@@ -199,6 +201,7 @@ final class CartaoDaCameraTests: XCTestCase {
         XCTAssertEqual(deteccaoDesligada.gravaPorMovimento, false)
         let soContinua = try cartao(try servidor(estado: ["Record": [["RecordMode": "ConfigRecord", "Mask": [["0x00000001"]]]]])).estado()
         XCTAssertEqual(soContinua.gravaPorMovimento, false, "a máscara não tem o bit do movimento")
+        XCTAssertEqual(soContinua.gravaSempre, true)
         let semPessoas = try cartao(try servidor(estado: ["Detect.HumanDetection": [["Enable": false]]])).estado()
         XCTAssertEqual(semPessoas.detectaPessoas, false)
     }

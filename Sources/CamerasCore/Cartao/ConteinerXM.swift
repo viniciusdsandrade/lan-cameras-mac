@@ -21,11 +21,19 @@ enum ConteinerXM {
         case audio([UInt8])
     }
 
+    /// Um quadro de referência: onde começa o cabeçalho dele e o relógio que a câmera escreveu nele.
+    struct Chave: Equatable {
+        let posicao: Int
+        let relogio: UInt32
+    }
+
     struct Lido {
         var itens: [Item] = []
         var codec: CodecDeVideo?
         /// Bytes que não formavam quadro e foram pulados (0 num arquivo bom).
         var pulados = 0
+        /// Os quadros de referência inteiros, na ordem do arquivo.
+        var chaves: [Chave] = []
         var quadros: Int { itens.reduce(0) { if case .video = $1 { return $0 + 1 } else { return $0 } } }
     }
 
@@ -65,6 +73,7 @@ enum ConteinerXM {
             switch marca {
             case 0xFC:
                 tipoDoVideo = Int(b[i + 4])
+                lido.chaves.append(Chave(posicao: i, relogio: UInt32(truncatingIfNeeded: Self.le32(b, i + 8))))
                 lido.itens.append(.video(nals: nals(conteudo), chave: true, quadrosPorSegundo: b[i + 5] > 0 ? Int(b[i + 5]) : nil))
             case 0xFD:
                 lido.itens.append(.video(nals: nals(conteudo), chave: false, quadrosPorSegundo: nil))
@@ -88,7 +97,19 @@ enum ConteinerXM {
         return b[16..<(16 + tamanho)]
     }
 
-    private static func le32(_ b: [UInt8], _ i: Int) -> Int {
+    /// A hora que a câmera escreveu no cabeçalho de um quadro de referência, no fuso dela e com precisão de 1 s:
+    /// (ano − 2000) << 26 | mês << 22 | dia << 17 | hora << 12 | minuto << 6 | segundo.
+    static func hora(_ relogio: UInt32, fuso: TimeZone) -> Date? {
+        let mes = Int((relogio >> 22) & 0xF), dia = Int((relogio >> 17) & 0x1F)
+        let h = Int((relogio >> 12) & 0x1F), m = Int((relogio >> 6) & 0x3F), s = Int(relogio & 0x3F)
+        guard (1...12).contains(mes), (1...31).contains(dia), h < 24, m < 60, s < 60 else { return nil }
+        var calendario = Calendar(identifier: .gregorian)
+        calendario.timeZone = fuso
+        return calendario.date(from: DateComponents(year: 2000 + Int(relogio >> 26), month: mes, day: dia,
+                                                    hour: h, minute: m, second: s))
+    }
+
+    static func le32(_ b: [UInt8], _ i: Int) -> Int {
         Int(b[i]) | Int(b[i + 1]) << 8 | Int(b[i + 2]) << 16 | Int(b[i + 3]) << 24
     }
 

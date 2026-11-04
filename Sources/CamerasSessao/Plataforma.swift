@@ -79,8 +79,12 @@ public enum Plataforma {
     }
 
     /// Onde ficam as gravações do cartão das câmeras já convertidas (o sistema pode apagar se faltar espaço).
+    /// `CAMERAS_CACHE` troca a pasta (uma cópia de teste aberta junto com o app não mexe nos pedaços dele).
     public static var pastaDeCacheDoCartao: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        if let p = ProcessInfo.processInfo.environment["CAMERAS_CACHE"], !p.isEmpty {
+            return URL(fileURLWithPath: p, isDirectory: true)
+        }
+        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Câmeras de Casa/Cartão", isDirectory: true)
     }
 

@@ -68,15 +68,22 @@ public struct EstadoDoCartao: Sendable, Equatable {
     public var comSom: Bool?
     /// Cartão cheio: grava por cima das gravações mais antigas.
     public var sobrescreve: Bool?
+    /// Grava o tempo todo, e não só quando há movimento.
+    public var gravaSempre: Bool?
+    /// A gravação mais antiga que ainda está no cartão: ele guarda daí até agora.
+    public var desde: Date?
 
     public init(totalMB: Int? = nil, livreMB: Int? = nil, gravaPorMovimento: Bool? = nil,
-                detectaPessoas: Bool? = nil, comSom: Bool? = nil, sobrescreve: Bool? = nil) {
+                detectaPessoas: Bool? = nil, comSom: Bool? = nil, sobrescreve: Bool? = nil,
+                gravaSempre: Bool? = nil, desde: Date? = nil) {
         self.totalMB = totalMB
         self.livreMB = livreMB
         self.gravaPorMovimento = gravaPorMovimento
         self.detectaPessoas = detectaPessoas
         self.comSom = comSom
         self.sobrescreve = sobrescreve
+        self.gravaSempre = gravaSempre
+        self.desde = desde
     }
 
     public var temCartao: Bool { (totalMB ?? 0) > 0 }
@@ -100,24 +107,31 @@ extension DVRIPClient {
         return r[nome]
     }
 
-    /// Uma configuração que a câmera guarda por canal (vem numa lista): a do canal 0.
-    func configuracaoDoCanal(_ nome: String) throws -> [String: Any] {
+    /// Uma configuração como a câmera mandou: um dicionário ou, nas guardadas por canal, a lista dos canais.
+    func configuracaoComoVeio(_ nome: String) throws -> Any {
         let r = try pedir(Self.msgLerConfig, ["Name": nome, "SessionID": sessaoTexto])
-        guard let ret = Self.ret(r), Self.retornosOK.contains(ret) else {
+        guard let ret = Self.ret(r), Self.retornosOK.contains(ret), let valor = r[nome] else {
             throw DVRIPErro("não consegui ler \(nome) (Ret=\(Self.ret(r).map(String.init) ?? "?"))")
         }
-        if let lista = r[nome] as? [[String: Any]], let primeiro = lista.first { return primeiro }
-        if let unico = r[nome] as? [String: Any] { return unico }
+        return valor
+    }
+
+    /// Uma configuração que a câmera guarda por canal (vem numa lista): a do canal 0.
+    func configuracaoDoCanal(_ nome: String) throws -> [String: Any] {
+        let valor = try configuracaoComoVeio(nome)
+        if let lista = valor as? [[String: Any]], let primeiro = lista.first { return primeiro }
+        if let unico = valor as? [String: Any] { return unico }
         throw DVRIPErro("\(nome) veio num formato inesperado")
     }
 
-    /// Os arquivos do cartão entre duas datas ("aaaa-MM-dd HH:mm:ss"), de todas as páginas: os vídeos
-    /// (`tipo` "h264", também os H.265) ou as fotos que a câmera tira no instante do movimento ("jpg").
-    func buscarArquivos(de inicio: String, ate fim: String, tipo: String = "h264") throws -> [[String: Any]] {
+    /// Os arquivos do cartão entre duas datas ("aaaa-MM-dd HH:mm:ss"), das primeiras `paginas` páginas (todas,
+    /// por padrão): os vídeos (`tipo` "h264", também os H.265) ou as fotos que a câmera tira no instante do
+    /// movimento ("jpg"). Vêm do mais antigo para o mais novo.
+    func buscarArquivos(de inicio: String, ate fim: String, tipo: String = "h264", paginas: Int = 200) throws -> [[String: Any]] {
         var todos: [[String: Any]] = []
         var vistos: Set<String> = []
         var desde = inicio
-        for _ in 0..<200 {
+        for _ in 0..<max(1, paginas) {
             let r = try pedir(Self.msgBuscarArquivos, [
                 "Name": "OPFileQuery", "SessionID": sessaoTexto,
                 "OPFileQuery": ["BeginTime": desde, "EndTime": fim, "Channel": 0, "DriverTypeMask": "0x0000FFFF",
@@ -135,11 +149,12 @@ extension DVRIPClient {
         return todos
     }
 
-    /// Baixa um arquivo do cartão. A câmera manda os dados em pedaços (mensagem 1426) sem avisar o
-    /// fim: `bytes` é o tamanho anunciado na busca (arredondado para cima, em KB); `completo` diz se
-    /// o que chegou já basta (uma foto termina antes desse tamanho); se ela parar antes, fica com o
-    /// que veio. `progresso` recebe os bytes já recebidos; devolver false cancela.
-    func baixarArquivo(_ caminho: String, inicio: String, fim: String, bytes: Int,
+    /// Baixa um arquivo do cartão, ou o trecho dele entre `inicio` e `fim`. A câmera manda os dados em
+    /// pedaços (mensagem 1426) sem avisar o fim: `bytes` é o tamanho anunciado na busca (arredondado para
+    /// cima, em KB); `completo` diz se o que chegou já basta (uma foto termina antes desse tamanho); se ela
+    /// parar antes, ou passar `silencio` segundos sem mandar nada, fica com o que veio. `progresso` recebe os
+    /// bytes já recebidos; devolver false cancela.
+    func baixarArquivo(_ caminho: String, inicio: String, fim: String, bytes: Int, silencio: TimeInterval = 3,
                        completo: ([UInt8]) -> Bool = { _ in false },
                        progresso: (Int) -> Bool) throws -> [UInt8] {
         let parametros: [String: Any] = ["PlayMode": "ByName", "FileName": caminho, "StreamType": 0, "Value": 0, "TransMode": "TCP"]
@@ -154,10 +169,10 @@ extension DVRIPClient {
         try enviarQuadro(Self.msgReproducao, try Self.jsonComTerminador(pedido("DownloadStart")))
         defer { try? enviarQuadro(Self.msgReproducao, try Self.jsonComTerminador(pedido("DownloadStop"))) }
         var dados: [UInt8] = []
-        dados.reserveCapacity(bytes)
+        dados.reserveCapacity(min(bytes, 16 << 20))
         while dados.count < bytes, !completo(dados) {
             let quadro: (id: Int, corpo: [UInt8])
-            do { quadro = try receberQuadro(timeout: dados.isEmpty ? nil : 3) }
+            do { quadro = try receberQuadro(timeout: dados.isEmpty ? nil : silencio) }
             catch { if dados.isEmpty { throw error } else { break } }
             if quadro.id == Self.msgDadosDoDownload {
                 dados += quadro.corpo
@@ -205,7 +220,8 @@ public final class CartaoDaCamera: Sendable {
     }
 
     private func comDVRIP<T>(_ corpo: (DVRIPClient) throws -> T) throws -> T {
-        try DVRIPClient.executar(host: camera.host, porta: porta, usuario: camera.usuario, hash: camera.hash, timeout: 8, corpo)
+        // gravando o tempo todo, a câmera demora mais a responder a busca de um dia inteiro (uns 400 arquivos)
+        try DVRIPClient.executar(host: camera.host, porta: porta, usuario: camera.usuario, hash: camera.hash, timeout: 15, corpo)
     }
 
     public func estado() throws -> EstadoDoCartao {
@@ -223,15 +239,13 @@ public final class CartaoDaCamera: Sendable {
                 e.totalMB = total
                 e.livreMB = livre
             }
-            if let m = try? d.configuracaoDoCanal("Detect.MotionDetect"), let g = try? d.configuracaoDoCanal("Record") {
+            let agenda = try? d.configuracaoDoCanal("Record")
+            if let agenda { e.gravaSempre = AgendaDoCartao.grava(agenda, AgendaDoCartao.continua) }
+            if let m = try? d.configuracaoDoCanal("Detect.MotionDetect"), let agenda {
                 let ligada = m["Enable"] as? Bool
                 let grava = (m["EventHandler"] as? [String: Any])?["RecordEnable"] as? Bool
-                let modo = g["RecordMode"] as? String
-                // máscara de cada trecho do dia: 0x1 contínua, 0x2 movimento, 0x4 alarme
-                let mascaras = ((g["Mask"] as? [[String]]) ?? []).joined()
-                let porMovimento = mascaras.contains { (Self.numero($0) ?? 0) & 0x2 != 0 }
-                if let ligada, let grava, let modo {
-                    e.gravaPorMovimento = ligada && grava && (modo == "ManualRecord" || (modo != "ClosedRecord" && porMovimento))
+                if let ligada, let grava, let porMovimento = AgendaDoCartao.grava(agenda, AgendaDoCartao.movimento) {
+                    e.gravaPorMovimento = ligada && grava && porMovimento
                 }
             }
             e.detectaPessoas = (try? d.configuracaoDoCanal("Detect.HumanDetection"))?["Enable"] as? Bool
@@ -239,7 +253,43 @@ public final class CartaoDaCamera: Sendable {
             if let geral = try? d.configuracao("General.General"), let s = geral["OverWrite"] as? String {
                 e.sobrescreve = s == "OverWrite"
             }
+            // a gravação mais antiga: a primeira de uma busca desde bem antes (a câmera devolve em ordem)
+            let f = Self.formatoDeData(fuso)
+            let agora = Date()
+            if let primeira = try? d.buscarArquivos(de: f.string(from: agora.addingTimeInterval(-90 * 86400)),
+                                                    ate: f.string(from: agora.addingTimeInterval(86400)), paginas: 1).first,
+               let texto = primeira["BeginTime"] as? String {
+                e.desde = f.date(from: texto)
+            }
             return e
+        }
+    }
+
+    /// Liga ou desliga a gravação o tempo todo, sem mexer no resto da agenda (a gravação por movimento segue
+    /// marcando os movimentos), e confere lendo de volta.
+    public func definirGravacaoContinua(_ ligada: Bool) throws {
+        try comDVRIP { d in
+            let novo: Any
+            switch try d.configuracaoComoVeio("Record") {
+            case let canais as [[String: Any]] where !canais.isEmpty:
+                novo = canais.map { AgendaDoCartao.comContinua($0, ligada: ligada) }
+            case let unico as [String: Any]:
+                novo = AgendaDoCartao.comContinua(unico, ligada: ligada)
+            default:
+                throw DVRIPErro("a agenda de gravação veio num formato inesperado")
+            }
+            try d.gravarConfiguracaoComoVeio("Record", novo)
+            guard AgendaDoCartao.grava(try d.configuracaoDoCanal("Record"), AgendaDoCartao.continua) == ligada else {
+                throw DVRIPErro("a câmera aceitou, mas a gravação não mudou")
+            }
+        }
+    }
+
+    /// A agenda de gravação como a câmera a guarda, em JSON: para conferir e guardar uma cópia antes de mudar.
+    public func agenda() throws -> String {
+        try comDVRIP { d in
+            let dados = try JSONSerialization.data(withJSONObject: try d.configuracaoComoVeio("Record"), options: [.sortedKeys])
+            return String(decoding: dados, as: UTF8.self)
         }
     }
 
@@ -273,6 +323,21 @@ public final class CartaoDaCamera: Sendable {
         }
         guard let jpeg = ConteinerXM.foto(bytes) else { throw DVRIPErro("a foto veio num formato inesperado") }
         return Data(jpeg)
+    }
+
+    /// Baixa só o trecho de uma gravação entre `inicio` e `fim`, como está no cartão. A câmera começa no
+    /// quadro de referência anterior a `inicio` e para perto de `fim` sem avisar: o download acaba depois de
+    /// `silencio` segundos sem dados (no meio do envio, ela manda um bloco a cada ~0,05 s), e o que chegou vale
+    /// (`JanelaDoCartao` corta e emenda os pedaços).
+    /// `continuar` recebe os bytes já recebidos; devolver false cancela.
+    public func baixarTrecho(_ g: GravacaoDoCartao, de inicio: Date, ate fim: Date, silencio: TimeInterval = 0.4,
+                             completo: ([UInt8]) -> Bool = { _ in false },
+                             continuar: (Int) -> Bool = { _ in true }) throws -> [UInt8] {
+        let f = Self.formatoDeData(fuso)
+        return try comDVRIP { d in
+            try d.baixarArquivo(g.caminho, inicio: f.string(from: inicio), fim: f.string(from: fim), bytes: .max,
+                                silencio: silencio, completo: completo, progresso: continuar)
+        }
     }
 
     /// Baixa uma gravação como está no cartão (o contêiner da câmera; `ConversorDoCartao` faz o MP4).

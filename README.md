@@ -17,11 +17,20 @@ do fabricante.
 - Luz branca (automática, ligada, desligada) e rastreio automático.
 - Ouvir a câmera, falar por ela ao vivo, tocar sons prontos e texto falado.
 - Foto da lente atual.
-- Gravações do cartão: as câmeras gravam sozinhas no cartão de memória quando há movimento, com
-  o som, mesmo com o Mac e o celular desligados (é o que o app do fabricante configura nelas). Em
-  Gravações, cada noite aparece numa linha do tempo e numa galeria com a foto do instante de cada
-  movimento (a câmera tira uma); o vídeo baixa do cartão e toca no próprio app, e dá para
-  guardá-lo como MP4. Também mostra o espaço do cartão e se a câmera está gravando.
+- Gravações do cartão: as câmeras gravam sozinhas no cartão de memória, com o som, mesmo com o Mac e
+  o celular desligados: quando há movimento (é o que o app do fabricante configura nelas) ou, ligando
+  em Gravações, o tempo todo. Quando o cartão enche, a câmera grava por cima do mais antigo, e o app
+  mostra quantos dias cada cartão guarda. Em Gravações, cada noite (ou dia) aparece numa linha do
+  tempo com uma faixa por câmera, com o que ela gravou e os intervalos em que não gravou, e numa lista
+  contada por hora: os movimentos seguidos de cada câmera (com até 5 minutos entre eles) viram um
+  período de atividade, com a foto do instante (a câmera tira uma), o começo e o fim e quantos
+  movimentos teve; num dia movimentado, uns 900 clipes curtos viram uns 130 períodos. Clicar numa
+  faixa ou num período toca o cartão daquela câmera a partir dali, sem parar, como uma fita: pula os
+  intervalos sem gravação (e avisa), anda em 1×, 2×, 4× ou 8×, e a régua embaixo do vídeo leva a
+  qualquer momento dos 20 minutos em volta. Arrastando a régua, o vídeo acompanha: no que já foi
+  baixado (os últimos 10 minutos e o minuto e meio à frente), na hora; fora disso, com a imagem de cada
+  instante, que a câmera manda em 0,5 a 3 s (a fita guarda de antemão uma a cada 30 s em volta, e a mais
+  perto aparece na hora). O movimento que está tocando dá para guardar como MP4.
 - Gravação no Mac (opcional, em Ajustes): uma cópia de cada movimento, com o som, gravada pelo Mac
   enquanto ele estiver ligado, começando uns segundos antes e seguindo enquanto o movimento durar.
   Por padrão só à noite (das 18 h às 6 h); segue com a janela fechada e a tela apagada.
@@ -63,7 +72,8 @@ de controles (movimento, posições salvas, luz e rastreio, sons), que se escond
 | M | liga e desliga o som da câmera |
 | ⇧⌘P | foto da lente atual |
 | ⇧⌘R | gravações do cartão das câmeras |
-| ← → e espaço | nas gravações: movimento anterior e seguinte, tocar e pausar |
+| ← → e espaço | nas gravações: período anterior e seguinte, tocar e pausar |
+| ⇧← e ⇧→ | nas gravações: 10 s para trás e para a frente |
 | ⌃⌘S | mostra e esconde a barra lateral |
 | ⌃⌘I | mostra e esconde o painel de controles da câmera |
 | ⌘? | como usar |
@@ -98,6 +108,20 @@ no Mac:
 As gravações do cartão vêm pelo DVRIP no formato da própria câmera (quadros de vídeo e de som
 intercalados) e viram MP4 sem recomprimir o vídeo. O som é o relógio: os quadros por segundo
 que a câmera declara são arredondados, e segui-los afastaria o som da imagem.
+
+Gravar o tempo todo acende o bit da gravação contínua (`0x1`) nos trechos da agenda de gravação da
+câmera (`Record`) e deixa o do movimento como estava, então a câmera segue marcando os arquivos de
+movimento entre os contínuos. Os arquivos do cartão têm 5 min; para tocar a partir de um momento, o
+app pede à câmera só o trecho entre duas horas (ela começa no quadro de referência de antes e manda
+de 3 a 5 vezes mais rápido que o tempo real), de 9 s a 1 min por vez, sempre um pouco adiante do que
+está tocando, e emenda os pedaços num quadro de referência, pela hora que a câmera escreve no
+cabeçalho de cada um. A câmera manda só os grupos inteiros (um quadro de referência e os que dependem
+dele, uns 3 s) que terminam antes da hora final pedida: se vier pouco para emendar, o app pede um
+trecho maior a partir do mesmo ponto, em vez de pular. E ela às vezes começa até uns 7 s depois da hora
+pedida: se a resposta começar depois do ponto da emenda, o app pede de novo começando antes. Enquanto
+precisa de vídeo, a fita fica com a vez da câmera (as fotos da lista esperam) e mantém pronto à frente
+um minuto e meio vezes a velocidade. Num cartão de 128 GB, o vídeo HD dessas câmeras gravado o tempo
+todo ocupa uns 15 GB por dia: o cartão guarda perto de uma semana.
 
 A gravação pelo Mac compara o vídeo de cada câmera com o de meio segundo antes, numa
 grade de brilhos: desconta a mudança geral de exposição, aprende o ruído de cada ponto da
@@ -149,10 +173,15 @@ detecção de movimento enxerga numa câmera, segundo a segundo e célula a cél
 swift run camspike vigiar --camera NOME --segundos 60 --mapa
 ```
 
-E para ver o que uma câmera gravou no cartão (e baixar uma gravação como MP4):
+E para ver o que uma câmera gravou no cartão (e baixar uma gravação como MP4, inteira ou só um
+trecho dela), o que está gravado e os intervalos sem gravação, e ligar ou desligar a gravação o
+tempo todo (mostra a agenda antes e depois):
 
 ```sh
 swift run camspike cartao --camera NOME --horas 12 --baixar ultimo --saida gravacao.mp4
+swift run camspike cartao --camera NOME --horas 1 --baixar 0 --trecho 20 --a-partir 30 --saida trecho.mp4
+swift run camspike cartao --camera NOME --horas 24 --cobertura
+swift run camspike cartao --camera NOME --continua sim
 ```
 
 Para saber se uma câmera está travada (aceita a conexão e não responde) ou sumiu, e acompanhar quando

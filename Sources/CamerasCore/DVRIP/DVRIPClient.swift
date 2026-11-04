@@ -161,6 +161,12 @@ public final class DVRIPClient: @unchecked Sendable {
 
     /// Grava uma configuração inteira: leia, modifique e grave de volta.
     public func gravarConfiguracao(_ nome: String, _ valor: [String: Any]) throws {
+        try gravarConfiguracaoComoVeio(nome, valor)
+    }
+
+    /// Grava uma configuração no formato em que ela veio: um dicionário ou, nas que a câmera guarda por canal,
+    /// a lista dos canais.
+    func gravarConfiguracaoComoVeio(_ nome: String, _ valor: Any) throws {
         let r = try pedir(Self.msgGravarConfig, ["Name": nome, "SessionID": sessaoTexto, nome: valor])
         guard let ret = Self.ret(r), Self.retornosOK.contains(ret) else {
             throw DVRIPErro("a câmera recusou a mudança (Ret=\(Self.ret(r).map(String.init) ?? "?"))")

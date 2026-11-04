@@ -15,7 +15,10 @@ func uso() -> Never {
       camspike audio --camera NOME [--segundos N]
       camspike vigiar --camera NOME [--stream principal|secundario] [--segundos N] [--sensibilidade baixa|media|alta]
                       [--pasta CAMINHO] [--sem-som] [--forcar SEGUNDOS] [--mapa]
-      camspike cartao --camera NOME [--horas N] [--baixar N|ultimo | --foto N|ultimo] [--saida ARQUIVO]
+      camspike cartao --camera NOME [--horas N] [--cobertura] [--saida ARQUIVO]
+                      [--baixar N|ultimo [--trecho SEGUNDOS] [--a-partir SEGUNDOS] | --foto N|ultimo]
+      camspike cartao --camera NOME --continua sim|nao
+      camspike cartao --camera NOME [--horas N] --quadros N [--saida ARQUIVO.png]
       camspike mover --camera NOME --direcao D [--velocidade V] [--ms N]
       camspike posicao listar|salvar|ir|apagar --camera NOME [--nome N] [--token T]
       camspike luz --camera NOME --modo automatico|ligada|desligada
@@ -624,15 +627,35 @@ func esperarResultado<T: Sendable>(_ f: @escaping @Sendable () async throws -> T
     return try caixa.r!.get()
 }
 
+/// O cartão de uma câmera: como ela grava, o que há gravado e, com `--baixar`, uma gravação inteira ou só um
+/// trecho dela (`--trecho`) convertida em MP4. `--continua sim|nao` liga ou desliga a gravação o tempo todo e
+/// mostra a agenda antes e depois (guarde a de antes para poder voltar a ela).
 func comandoCartao(_ opcoes: Opcoes) {
     let camera = cameraEscolhida(opcoes)
     let cartao = CartaoDaCamera(camera: camera)
     func sim(_ v: Bool?) -> String { v.map { $0 ? "sim" : "não" } ?? "?" }
+    let hora = DateFormatter()
+    hora.dateFormat = "dd/MM HH:mm:ss"
+
+    if let pedido = opcoes.texto("--continua") {
+        guard ["sim", "nao"].contains(pedido) else { fputs("use --continua sim|nao\n", stderr); exit(2) }
+        do {
+            print("agenda antes:  \(try cartao.agenda())")
+            try cartao.definirGravacaoContinua(pedido == "sim")
+            print("agenda depois: \(try cartao.agenda())")
+            print("RESULTADO: OK")
+            return
+        } catch { print("RESULTADO: FALHOU (\(error))"); exit(1) }
+    }
+
     do {
         let e = try cartao.estado()
         print(e.temCartao ? "cartão: \(e.livreMB ?? 0) MB livres de \(e.totalMB ?? 0) MB" : "cartão: nenhum")
-        print("grava por movimento: \(sim(e.gravaPorMovimento)), só pessoas: \(sim(e.detectaPessoas)), "
-              + "com som: \(sim(e.comSom)), cheio grava por cima: \(sim(e.sobrescreve))")
+        print("grava o tempo todo: \(sim(e.gravaSempre)), por movimento: \(sim(e.gravaPorMovimento)), "
+              + "só pessoas: \(sim(e.detectaPessoas)), com som: \(sim(e.comSom)), cheio grava por cima: \(sim(e.sobrescreve))")
+        if let desde = e.desde {
+            print(String(format: "guarda desde %@ (%.1f dias)", hora.string(from: desde), Date().timeIntervalSince(desde) / 86400))
+        }
     } catch { print("estado do cartão: \(error)") }
 
     let horas = opcoes.decimal("--horas", padrao: 12)
@@ -655,12 +678,52 @@ func comandoCartao(_ opcoes: Opcoes) {
             return
         } catch { print("RESULTADO: FALHOU (\(error))"); exit(1) }
     }
-    let hora = DateFormatter()
-    hora.dateFormat = "dd/MM HH:mm:ss"
     print("\(lista.count) gravações nas últimas \(Int(horas)) h")
     for (i, g) in lista.enumerated() {
         print(String(format: "  %3d) %@ – %@  %4.0f s  %6d KB  %@", i, hora.string(from: g.inicio), hora.string(from: g.fim),
                      g.duracao, g.bytes / 1024, "\(g.motivo)"))
+    }
+    if opcoes.marcada("--cobertura") {
+        let cobertura = CoberturaDoCartao(lista)
+        print(String(format: "cobertura: %.1f h gravadas em %d trechos", cobertura.duracao / 3600, cobertura.trechos.count))
+        for t in cobertura.trechos {
+            print(String(format: "  gravado %@ – %@  %6.1f min", hora.string(from: t.inicio), hora.string(from: t.fim), t.duracao / 60))
+        }
+        for b in cobertura.buracos(de: agora.addingTimeInterval(-horas * 3600), ate: agora) {
+            print(String(format: "  buraco  %@ – %@  %6.0f s", hora.string(from: b.inicio), hora.string(from: b.fim), b.duracao))
+        }
+    }
+    if opcoes.texto("--quadros") != nil {
+        // como o arrasto da régua no app: o quadro de referência de vários instantes seguidos, um de cada vez
+        let n = max(1, opcoes.inteiro("--quadros", padrao: 6))
+        let gravacoes = lista.filter { $0.duracao >= 30 }
+        guard let primeira = gravacoes.first, let ultima = gravacoes.last else { print("RESULTADO: FALHOU (sem gravações longas)"); exit(1) }
+        var ultimaImagem: CGImage?
+        var tempos: [Double] = []
+        for k in 0..<n {
+            let instante = primeira.inicio.addingTimeInterval(Double(k) / Double(max(1, n - 1)) * ultima.fim.timeIntervalSince(primeira.inicio) * 0.98)
+            guard let g = gravacoes.last(where: { $0.inicio <= instante }) else { continue }
+            let antes = Date()
+            do {
+                let bytes = try cartao.quadroDeReferencia(g, em: instante)
+                let imagem = QuadroDoCartao.imagem(de: bytes)
+                let s = Date().timeIntervalSince(antes)
+                tempos.append(s)
+                print(String(format: "  quadro de %@: %d KB, %@, em %.2f s", hora.string(from: instante), bytes.count / 1024,
+                             imagem.map { "\($0.width)x\($0.height)" } ?? "sem imagem", s))
+                if let imagem { ultimaImagem = imagem }
+            } catch { print("  quadro de \(hora.string(from: instante)): falhou (\(error))") }
+        }
+        if let saida = opcoes.texto("--saida"), let imagem = ultimaImagem,
+           let destino = CGImageDestinationCreateWithURL(URL(fileURLWithPath: saida) as CFURL, "public.png" as CFString, 1, nil) {
+            CGImageDestinationAddImage(destino, imagem, nil)
+            CGImageDestinationFinalize(destino)
+            print("último quadro em \(saida)")
+        }
+        let media = tempos.isEmpty ? 0 : tempos.reduce(0, +) / Double(tempos.count)
+        print(String(format: "média %.2f s por quadro (%.1f quadros por segundo num arrasto)", media, media > 0 ? 1 / media : 0))
+        print("RESULTADO: OK")
+        return
     }
     guard let pedido = opcoes.texto("--baixar") else { print("RESULTADO: OK"); return }
     let indice = pedido == "ultimo" ? lista.count - 1 : (Int(pedido) ?? -1)
@@ -668,6 +731,30 @@ func comandoCartao(_ opcoes: Opcoes) {
     let g = lista[indice]
     let destino = URL(fileURLWithPath: opcoes.texto("--saida") ?? FileManager.default.temporaryDirectory.appendingPathComponent("cartao.mp4").path)
     let inicio = Date()
+
+    if let segundos = opcoes.texto("--trecho").flatMap(Double.init) {
+        let de = g.inicio.addingTimeInterval(opcoes.decimal("--a-partir", padrao: 0))
+        let ate = min(g.fim, de.addingTimeInterval(segundos))
+        do {
+            let bytes = try cartao.baixarTrecho(g, de: de, ate: ate)
+            print(String(format: "trecho de %@ a %@: %d bytes em %.2f s", hora.string(from: de), hora.string(from: ate),
+                         bytes.count, Date().timeIntervalSince(inicio)))
+            guard let janela = JanelaDoCartao.cortar(bytes, desde: nil, cortarNoUltimo: ate < g.fim) else {
+                print("RESULTADO: FALHOU (o trecho não trouxe quadros de referência suficientes)")
+                exit(1)
+            }
+            print("janela: começa \(hora.string(from: janela.inicio)), a seguinte em \(janela.proximo.map { hora.string(from: $0) } ?? "nenhuma (fim)"), "
+                  + "\(janela.bytes.count) bytes")
+            let r = try esperarResultado { try await ConversorDoCartao.converter(janela.bytes, para: destino) }
+            print(String(format: "MP4: %@ (%d quadros, %.1f s, %@)", destino.path, r.quadros, r.duracao, r.comSom ? "com som" : "sem som"))
+            print("RESULTADO: OK")
+        } catch {
+            print("RESULTADO: FALHOU (\(error))")
+            exit(1)
+        }
+        return
+    }
+
     var proximoAviso = 0.25
     do {
         let bytes = try cartao.baixar(g) { p in

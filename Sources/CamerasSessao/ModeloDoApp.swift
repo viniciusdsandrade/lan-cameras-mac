@@ -43,8 +43,9 @@ public final class ModeloDoApp: ObservableObject {
     /// Câmeras cujas credenciais estão sendo pegas de novo (uma vez por câmera de cada vez).
     private var renovando: Set<String> = []
 
-    /// `argumentos`: `--abrir NOME` (uma câmera, ou "gravações"), `--qualidade leve|hd`, `--zoom N` abrem
-    /// direto num estado (útil em testes e capturas de tela).
+    /// `argumentos`: `--abrir NOME` (uma câmera, ou "gravações"), `--qualidade leve|hd`, `--zoom N` e `--fita NOME HH:MM`
+    /// (o cartão de uma câmera tocando a partir dessa hora, com `--velocidade N`; com `--arrastar N`, depois de 15 s
+    /// tocando, um arrasto de N segundos na régua, em 2 s) abrem direto num estado (útil em testes e capturas de tela).
     /// `reidentificar`: como pegar de novo os dados de uma câmera que recusou a senha ou parou de
     /// responder (os testes trocam). `sondar`: como saber se uma câmera que não responde está travada no
     /// endereço dela (os testes trocam). `pastaDeGravacoes` e `agora`: onde a gravação por movimento
@@ -159,6 +160,7 @@ public final class ModeloDoApp: ObservableObject {
             sessaoDaCamera?.encerrar()
             sessaoDaCamera = nil
             soltandoAinda = (soltandoAinda + soltas).filter { !$0.terminado }       // as que já avisaram a câmera saem
+            cartoes.pausarFita()                                                     // a fita também conversa com a câmera
         }
         esperarAviso(ate: segundos)
     }
@@ -175,6 +177,7 @@ public final class ModeloDoApp: ObservableObject {
         Depuracao.registrar("retomar: reabrindo as sessões")
         pausado = false
         ajustarSessoes()
+        if selecao == .gravacoes { cartoes.retomarFita() }                       // no mesmo segundo em que parou
     }
 
     public func pausarDepois(segundos: Double) {
@@ -403,6 +406,16 @@ public final class ModeloDoApp: ObservableObject {
         if let n = valor("--abrir") {
             if simples(n) == "gravacoes" { selecao = .gravacoes }
             else if let c = cameras.first(where: { simples($0.nome) == simples(n) }) { selecao = .camera(c.id) }
+        }
+        // --fita NOME HH:MM [--velocidade N]: nas gravações, toca o cartão de uma câmera a partir dessa hora de hoje
+        if let i = a.firstIndex(of: "--fita"), i + 2 < a.count,
+           let c = cameras.first(where: { simples($0.nome) == simples(a[i + 1]) }) {
+            let partes = a[i + 2].split(separator: ":").compactMap { Int($0) }
+            if partes.count >= 2,
+               let quando = Calendar.current.date(bySettingHour: partes[0], minute: partes[1], second: partes.count > 2 ? partes[2] : 0, of: Date()) {
+                cartoes.pedirFita(camera: c.id, em: quando, velocidade: valor("--velocidade").flatMap(Float.init) ?? 1,
+                                  arrastar: valor("--arrastar").flatMap(Double.init))
+            }
         }
     }
 }

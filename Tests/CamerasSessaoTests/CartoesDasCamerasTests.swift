@@ -48,6 +48,26 @@ final class CartoesDasCamerasTests: XCTestCase {
         var semResposta: Set<String> = []
         var falharAoBaixar = false
         var demoraDaFoto = 0.0
+        /// Quanto cada conversa (estado, busca) demora, para dar chance de elas se cruzarem.
+        var demoraDaConversa = 0.0
+        /// Quantas buscas ainda falham como câmera que demorou a responder.
+        var falhasDeRede = 0
+        /// Quanto a busca de cada câmera demora a mais.
+        var demoraDaBusca: [String: Double] = [:]
+        private var ocupadas: [String: Int] = [:]
+        private var _maximoPorCamera = 0
+        var maximoPorCamera: Int { trava.withLock { _maximoPorCamera } }
+
+        /// Uma conversa com a câmera `id`: conta quantas estão abertas com ela ao mesmo tempo.
+        private func conversa<T>(_ id: String, _ corpo: () throws -> T) rethrows -> T {
+            trava.withLock {
+                ocupadas[id, default: 0] += 1
+                _maximoPorCamera = max(_maximoPorCamera, ocupadas[id]!)
+            }
+            defer { trava.withLock { ocupadas[id, default: 1] -= 1 } }
+            Thread.sleep(forTimeInterval: trava.withLock { demoraDaConversa })
+            return try corpo()
+        }
 
         var buscas: [(camera: String, de: Date, ate: Date)] { trava.withLock { _buscas } }
         var baixados: Int { trava.withLock { _baixados } }
@@ -57,11 +77,22 @@ final class CartoesDasCamerasTests: XCTestCase {
         func fonte() -> CartoesDasCameras.Fonte {
             CartoesDasCameras.Fonte(
                 estado: { [self] c in
-                    if trava.withLock({ semResposta.contains(c.id) }) { throw DVRIPErro("a câmera não respondeu pelo DVRIP") }
-                    return EstadoDoCartao(totalMB: 118862, livreMB: 13648, gravaPorMovimento: true, detectaPessoas: true, comSom: true, sobrescreve: true)
+                    try conversa(c.id) {
+                        if trava.withLock({ semResposta.contains(c.id) }) { throw DVRIPErro("a câmera não respondeu pelo DVRIP") }
+                        return EstadoDoCartao(totalMB: 118862, livreMB: 13648, gravaPorMovimento: true, detectaPessoas: true, comSom: true, sobrescreve: true)
+                    }
                 },
                 eventos: { [self] c, de, ate in
+                    try conversa(c.id) { () throws -> Void in
+                        let falha = trava.withLock { () -> Bool in
+                            guard falhasDeRede > 0 else { return false }
+                            falhasDeRede -= 1
+                            return true
+                        }
+                        if falha { throw DVRIPErro("a câmera não respondeu pelo DVRIP", deRede: true) }
+                    }
                     trava.withLock { _buscas.append((c.id, de, ate)) }
+                    Thread.sleep(forTimeInterval: trava.withLock { demoraDaBusca[c.id] ?? 0 })
                     if trava.withLock({ semResposta.contains(c.id) }) { throw DVRIPErro("a câmera não respondeu pelo DVRIP") }
                     let videos = [3600.0, 7200].map { s in
                         GravacaoDoCartao(caminho: "/idea0/\(c.id)/\(Int(s))[M].h264", inicio: de.addingTimeInterval(s + Double(c.ordem)),
@@ -80,15 +111,17 @@ final class CartoesDasCamerasTests: XCTestCase {
                     _ = progresso(1)
                     return [1, 2, 3]
                 },
-                baixarFoto: { [self] _, _ in
-                    trava.withLock {
-                        _fotosBaixadas += 1
-                        _simultaneas += 1
-                        _maximoSimultaneas = max(_maximoSimultaneas, _simultaneas)
+                baixarFoto: { [self] c, _ in
+                    try conversa(c.id) {
+                        trava.withLock {
+                            _fotosBaixadas += 1
+                            _simultaneas += 1
+                            _maximoSimultaneas = max(_maximoSimultaneas, _simultaneas)
+                        }
+                        Thread.sleep(forTimeInterval: trava.withLock { demoraDaFoto })
+                        trava.withLock { _simultaneas -= 1 }
+                        return CartoesDasCamerasTests.jpeg
                     }
-                    Thread.sleep(forTimeInterval: trava.withLock { demoraDaFoto })
-                    trava.withLock { _simultaneas -= 1 }
-                    return CartoesDasCamerasTests.jpeg
                 },
                 converter: { bytes, destino in try Data(bytes).write(to: destino) })
         }
@@ -114,8 +147,9 @@ final class CartoesDasCamerasTests: XCTestCase {
         return condicao()
     }
 
+    /// Os eventos, depois de todas as câmeras responderem (cada uma aparece assim que responde).
     private func eventosProntos(_ m: ModeloDoApp) async -> [EventoDoCartao] {
-        _ = await esperar { if case .pronto = m.cartoes.eventos { return true } else { return false } }
+        _ = await esperar { if case .pronto = m.cartoes.eventos { return m.cartoes.buscando.isEmpty } else { return false } }
         if case .pronto(let l) = m.cartoes.eventos { return l }
         return []
     }
@@ -130,8 +164,8 @@ final class CartoesDasCamerasTests: XCTestCase {
         XCTAssertEqual(eventos.count, 6, "dois movimentos em cada uma das três câmeras")
         XCTAssertEqual(eventos.map(\.inicio), eventos.map(\.inicio).sorted(by: >), "do mais novo para o mais antigo")
         XCTAssertEqual(Set(camera.buscas.map(\.camera)), ["SERIE-FALSA-1", "SERIE-FALSA-2", "SERIE-FALSA-3"])
-        XCTAssertTrue(camera.buscas.allSatisfy { $0.de == Self.data(23, 18) && $0.ate == Self.data(24, 6) },
-                      "a noite vai das 18 h às 6 h, como a gravação pelo Mac")
+        XCTAssertTrue(camera.buscas.allSatisfy { $0.de == Self.data(23, 17, 50) && $0.ate == Self.data(24, 6) },
+                      "a noite vai das 18 h às 6 h, como a gravação pelo Mac (a busca começa 10 min antes, para pegar a gravação em curso)")
         XCTAssertEqual(m.cartoes.selecionado, eventos.first?.id, "o mais novo já vem escolhido")
         let leu = await esperar { m.cartoes.estados.count == 3 && m.cartoes.estados.values.allSatisfy { if case .pronto = $0 { return true } else { return false } } }
         XCTAssertTrue(leu, "o estado do cartão de cada câmera: \(m.cartoes.estados)")
@@ -163,6 +197,81 @@ final class CartoesDasCamerasTests: XCTestCase {
             return false
         }
         XCTAssertTrue(buscou, "\(m.cartoes.eventos)")
+        m.pausar()
+    }
+
+    func testUmaConversaDeCadaVezComCadaCamera() async {
+        let camera = CameraFalsa()
+        camera.demoraDaConversa = 0.05
+        let m = modelo(agora: Self.data(24, 2), camera)
+        m.cartoes.abrir()
+        let eventos = await eventosProntos(m)
+        await withTaskGroup(of: Void.self) { grupo in
+            for e in eventos { grupo.addTask { await m.cartoes.carregarFoto(e) } }
+        }
+        let leu = await esperar {
+            m.cartoes.estados.count == 3 && m.cartoes.estados.values.allSatisfy { if case .pronto = $0 { return true } else { return false } }
+        }
+        XCTAssertTrue(leu)
+        XCTAssertEqual(camera.maximoPorCamera, 1, "a busca, o estado do cartão e as fotos de uma câmera não vão juntos: ela demora a responder a mais de uma")
+        m.pausar()
+    }
+
+    func testCadaCameraApareceAssimQueResponde() async {
+        let camera = CameraFalsa()
+        camera.demoraDaBusca = ["SERIE-FALSA-2": 1.0]
+        let m = modelo(agora: Self.data(24, 2), camera)
+        m.cartoes.abrir()
+        let parcial = await esperar {
+            if case .pronto(let l) = m.cartoes.eventos { return l.count == 4 && m.cartoes.buscando == ["SERIE-FALSA-2"] }
+            return false
+        }
+        XCTAssertTrue(parcial, "as que já responderam aparecem sem esperar a lenta: \(m.cartoes.eventos), \(m.cartoes.buscando)")
+        XCTAssertEqual(Set(m.cartoes.coberturas.keys), ["SERIE-FALSA-1", "SERIE-FALSA-3"])
+        let eventos = await eventosProntos(m)
+        XCTAssertEqual(eventos.count, 6)
+        XCTAssertEqual(m.cartoes.selecionado, eventos.first?.id, "o mais novo de todos, mesmo vindo da câmera mais lenta")
+        m.pausar()
+    }
+
+    /// A ordem em que cada um pegou a vez (os testes rodam na thread principal).
+    @MainActor private final class Ordem {
+        var itens: [String] = []
+    }
+
+    func testQuemAssisteNaoEsperaAsFotos() async {
+        let vez = VezDaCamera()
+        let ordem = Ordem()
+        await vez.pegar()                                        // uma conversa já em curso
+        var fotos: [Task<Void, Never>] = []
+        for k in 1...3 {
+            fotos.append(Task { @MainActor in
+                await vez.pegar()
+                ordem.itens.append("foto \(k)")
+                await vez.soltar()
+            })
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        let fita = Task { @MainActor in
+            await vez.pegar(prioridade: true)
+            ordem.itens.append("fita")
+            await vez.soltar()
+        }
+        try? await Task.sleep(for: .milliseconds(20))
+        await vez.soltar()
+        for t in fotos { await t.value }
+        await fita.value
+        XCTAssertEqual(ordem.itens, ["fita", "foto 1", "foto 2", "foto 3"], "o vídeo passa na frente; as fotos seguem na ordem")
+    }
+
+    func testBuscaQueDemoraTentaDeNovoUmaVez() async {
+        let camera = CameraFalsa()
+        camera.falhasDeRede = 1
+        let m = modelo(agora: Self.data(24, 2), camera)
+        m.cartoes.abrir()
+        let eventos = await eventosProntos(m)
+        XCTAssertEqual(eventos.count, 6, "a câmera que demorou respondeu na segunda tentativa")
+        XCTAssertTrue(m.cartoes.falhas.isEmpty, "\(m.cartoes.falhas)")
         m.pausar()
     }
 
