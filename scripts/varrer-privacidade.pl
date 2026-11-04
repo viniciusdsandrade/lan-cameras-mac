@@ -35,7 +35,9 @@ while (my $l = <STDIN>) {
         next if grep { $_ > 255 } split /\./, $ip;
         marca('ipv4') unless ip_permitido($ip);
     }
-    while ($l =~ /\b((?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})\b/g) {
+    # um MAC usa um separador só ("00:1a:..." ou "00-1a-..."): "00:00:00-24:00:00", um horário da agenda das
+    # câmeras, não é MAC
+    while ($l =~ /\b((?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}|(?:[0-9A-Fa-f]{2}-){5}[0-9A-Fa-f]{2})\b/g) {
         my $m = lc $1;
         $m =~ s/-/:/g;
         marca('mac') unless $m =~ /^(?:02:00:00:|00:00:00:00:00:00)/;
